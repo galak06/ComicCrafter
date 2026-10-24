@@ -38,8 +38,9 @@ class Character:
         Returns:
             Dictionary representation
         """
-        return asdict(self)
-    
+        # ChromaDB rejects empty list metadata values, so omit them.
+        return {k: v for k, v in asdict(self).items() if v != []}
+
     def to_description(self) -> str:
         """Generate a full text description of the character.
         

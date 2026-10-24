@@ -65,7 +65,8 @@ class ImageGenerator:
             )
         
         logger.info(f"Generating panel with prompt: {enhanced_prompt[:100]}...")
-        
+        target_size = kwargs.pop("target_size", None) or (self.width, self.height)
+
         try:
             # Generate image
             image_bytes = self.client.generate_image(
@@ -78,7 +79,7 @@ class ImageGenerator:
             image = Image.open(BytesIO(image_bytes))
             
             # Resize to target dimensions
-            image = image.resize((self.width, self.height), Image.Resampling.LANCZOS)
+            image = image.resize(target_size, Image.Resampling.LANCZOS)
             
             logger.info("Panel generated successfully")
             return image

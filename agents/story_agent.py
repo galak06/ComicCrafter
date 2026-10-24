@@ -2,7 +2,7 @@
 
 from typing import List, Dict, Any, Optional
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 from generation.api_clients import LLMClient, GroqClient
 from rag.character_memory import CharacterMemory, Character
@@ -21,12 +21,16 @@ class Scene:
         dialogue: Dialogue lines for the scene
         action: Action description
         setting: Setting/location description
+        speakers: Speaker name for each dialogue line (same order as dialogue)
+        caption: Optional narration caption for the panel
     """
     description: str
     characters: List[str]
     dialogue: List[str]
     action: str
     setting: str
+    speakers: List[str] = field(default_factory=list)
+    caption: str = ""
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -94,9 +98,12 @@ class StoryAgent:
 For each scene, provide:
 1. A brief description of what happens
 2. Characters present in the scene
-3. Dialogue lines (if any)
+3. Dialogue lines (if any), each with the name of the character who says it
 4. Main action
 5. Setting/location
+6. An optional short narration caption (time, place or narrator voice), or "" if none
+
+Keep each dialogue line short (under 15 words), at most 2 lines per scene.
 
 Story:
 {story_text}
@@ -105,9 +112,10 @@ Format your response as a JSON array of scenes. Each scene should have this stru
 {{
     "description": "Brief scene description",
     "characters": ["character1", "character2"],
-    "dialogue": ["line1", "line2"],
+    "dialogue": [{{"speaker": "character1", "text": "line1"}}],
     "action": "Main action description",
-    "setting": "Location description"
+    "setting": "Location description",
+    "caption": "Short narration caption or empty string"
 }}
 
 Respond with only the JSON array, no additional text."""
@@ -137,12 +145,19 @@ Respond with only the JSON array, no additional text."""
                 
                 scenes = []
                 for scene_data in scenes_data:
+                    # Dialogue items may be {"speaker", "text"} objects or plain strings
+                    lines = [
+                        d if isinstance(d, dict) else {"speaker": "", "text": str(d)}
+                        for d in scene_data.get("dialogue", [])
+                    ]
                     scene = Scene(
                         description=scene_data.get("description", ""),
                         characters=scene_data.get("characters", []),
-                        dialogue=scene_data.get("dialogue", []),
+                        dialogue=[d.get("text", "") for d in lines],
                         action=scene_data.get("action", ""),
-                        setting=scene_data.get("setting", "")
+                        setting=scene_data.get("setting", ""),
+                        speakers=[d.get("speaker", "") for d in lines],
+                        caption=scene_data.get("caption", "") or ""
                     )
                     scenes.append(scene)
                 

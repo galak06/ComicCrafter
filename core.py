@@ -9,8 +9,11 @@ from agents.prompt_agent import PromptAgent, ImagePrompt
 from agents.layout_agent import LayoutAgent, PageLayout
 from generation.image_generator import ImageGenerator
 from generation.api_clients import GroqClient, GeminiClient, HuggingFaceClient
+from generation.openrouter_image_client import OpenRouterImageClient, closest_aspect_ratio
+from layout.bubble_planner import plan_bubbles, default_plan
+from layout.comic_bubbles import render_dialogue
 from layout.panel_layout import LayoutManager
-from layout.text_overlay import TextOverlay, TextBox, TextType
+from layout.text_overlay import TextOverlay
 from rag.character_memory import CharacterMemory
 from utils import get_config, get_logger
 
@@ -30,7 +33,7 @@ class ComicCrafter:
         
         Args:
             llm_provider: LLM provider ("groq" or "gemini")
-            image_provider: Image generation provider ("huggingface")
+            image_provider: Image generation provider ("huggingface" or "openrouter")
             output_dir: Directory for output files
         """
         self.config = get_config()
@@ -48,6 +51,8 @@ class ComicCrafter:
         # Initialize image client
         if image_provider.lower() == "huggingface":
             self.image_client = HuggingFaceClient()
+        elif image_provider.lower() == "openrouter":
+            self.image_client = OpenRouterImageClient()
         else:
             raise ValueError(f"Unknown image provider: {image_provider}")
         
@@ -148,28 +153,31 @@ class ComicCrafter:
             page_prompts = [prompts[i] for i in page_layout.scene_indices]
             page_scenes = [scenes[i] for i in page_layout.scene_indices]
             
+            # Create layout first so panels are generated at their final shape
+            layout = self.layout_manager.create_layout(
+                page_layout.layout_type,
+                num_panels=page_layout.num_panels
+            )
+            slot_sizes = [panel.get_content_area()[2:] for panel in layout]
+
             # Generate panel images
             panel_images = []
-            for prompt in page_prompts:
+            for prompt, (cw, ch) in zip(page_prompts, slot_sizes):
                 panel = self.image_generator.generate_panel(
                     prompt=prompt.prompt,
                     character_context=prompt.character_context,
-                    negative_prompt=prompt.negative_prompt
+                    negative_prompt=prompt.negative_prompt,
+                    aspect_ratio=closest_aspect_ratio(cw, ch),
+                    target_size=(cw, ch)
                 )
-                panel_images.append(panel)
-            
+                panel_images.append(panel.resize((cw, ch)) if panel.size != (cw, ch) else panel)
+
             # Add dialogue overlays if requested
             if add_dialogue:
                 panel_images = self._add_dialogue_to_panels(
                     panel_images, page_scenes
                 )
-            
-            # Create layout and compose page
-            layout = self.layout_manager.create_layout(
-                page_layout.layout_type,
-                num_panels=page_layout.num_panels
-            )
-            
+
             page_image = self.layout_manager.compose_page(
                 panels=panel_images,
                 layout=layout
@@ -199,45 +207,22 @@ class ComicCrafter:
             List of panels with dialogue overlays
         """
         result_panels = []
-        
+
         for panel, scene in zip(panels, scenes):
-            if scene.dialogue:
-                # Create text boxes for dialogue
-                text_boxes = []
-                panel_width = panel.width
-                panel_height = panel.height
-                
-                # Position text boxes
-                num_lines = len(scene.dialogue)
-                for i, line in enumerate(scene.dialogue):
-                    # Alternate positions for multiple dialogue lines
-                    if num_lines == 1:
-                        x = panel_width // 2
-                        y = panel_height - 60
-                    elif i % 2 == 0:
-                        x = panel_width // 3
-                        y = panel_height - 60 - (i // 2) * 80
-                    else:
-                        x = 2 * panel_width // 3
-                        y = panel_height - 60 - (i // 2) * 80
-                    
-                    text_box = TextBox(
-                        text=line,
-                        x=x,
-                        y=y,
-                        text_type=TextType.SPEECH_BUBBLE,
-                        max_width=min(200, panel_width - 40)
-                    )
-                    text_boxes.append(text_box)
-                
-                # Add text overlays
-                panel_with_text = self.text_overlay.add_text_to_panel(
-                    panel, text_boxes
-                )
-                result_panels.append(panel_with_text)
-            else:
+            if not (scene.dialogue or scene.caption):
                 result_panels.append(panel)
-        
+                continue
+
+            # Ask a vision model where each speaker is, fall back to bubbles across the top
+            num_lines = len(scene.dialogue)
+            speakers = (scene.speakers + [""] * num_lines)[:num_lines]
+            plan = None
+            if scene.dialogue:
+                plan = plan_bubbles(panel, list(zip(speakers, scene.dialogue)), bool(scene.caption))
+            plan = plan or default_plan(num_lines)
+
+            result_panels.append(render_dialogue(panel, scene.dialogue, scene.caption, plan))
+
         return result_panels
     
     def generate_from_scenes(

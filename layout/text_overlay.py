@@ -6,6 +6,7 @@ from enum import Enum
 from PIL import Image, ImageDraw, ImageFont
 import textwrap
 
+from layout.bubble_placement import place_bubble
 from utils import get_logger
 
 logger = get_logger(__name__)
@@ -116,9 +117,10 @@ class TextOverlay:
         # Create a copy to avoid modifying original
         panel_copy = panel.copy()
         draw = ImageDraw.Draw(panel_copy)
-        
+        placed = []
+
         for text_box in text_boxes:
-            self._draw_text_box(draw, panel_copy, text_box)
+            self._draw_text_box(draw, panel_copy, text_box, placed)
         
         logger.debug(f"Added {len(text_boxes)} text overlays to panel")
         return panel_copy
@@ -127,14 +129,16 @@ class TextOverlay:
         self,
         draw: ImageDraw.ImageDraw,
         image: Image.Image,
-        text_box: TextBox
+        text_box: TextBox,
+        placed: Optional[List[Tuple[int, int, int, int]]] = None
     ) -> None:
         """Draw a single text box on the image.
-        
+
         Args:
             draw: ImageDraw object
             image: Panel image
             text_box: TextBox to draw
+            placed: Bubbles already drawn on this panel; updated in place
         """
         # Load font with appropriate size
         font = self._load_font(text_box.font_size)
@@ -158,7 +162,14 @@ class TextOverlay:
         # Ensure bubble stays within image bounds
         bubble_x = max(5, min(bubble_x, image.width - bubble_width - 5))
         bubble_y = max(5, min(bubble_y, image.height - bubble_height - 5))
-        
+
+        # Move aside from bubbles already drawn on this panel
+        if placed is not None:
+            bubble_x, bubble_y, _, _ = place_bubble(
+                (bubble_x, bubble_y, bubble_width, bubble_height), placed, image.size
+            )
+            placed.append((bubble_x, bubble_y, bubble_width, bubble_height))
+
         # Draw based on text type
         if text_box.text_type == TextType.SPEECH_BUBBLE:
             self._draw_speech_bubble(

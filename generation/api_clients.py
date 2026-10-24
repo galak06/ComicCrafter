@@ -1,9 +1,10 @@
 """API client implementations for various AI services."""
 
+import os
 from typing import Optional, Dict, Any
 import requests
 from abc import ABC, abstractmethod
-from groq import Groq
+from openai import OpenAI
 from utils import get_config, get_logger
 
 logger = get_logger(__name__)
@@ -35,23 +36,23 @@ class LLMClient(ABC):
 
 
 class GroqClient(LLMClient):
-    """Client for Groq API (Llama 3.3)."""
+    """Client for an OpenAI-compatible chat API (routed through OpenRouter)."""
     
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         """Initialize Groq client.
         
         Args:
-            api_key: Groq API key. If None, uses config
+            api_key: OpenRouter API key. If None, uses OPENROUTER_API_KEY
             model: Model name. If None, uses config default
         """
         config = get_config()
-        self.api_key = api_key or config.groq_api_key
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
         self.model = model or config.default_llm_model
         
         if not self.api_key:
-            raise ValueError("Groq API key not provided")
+            raise ValueError("OpenRouter API key not provided")
         
-        self.client = Groq(api_key=self.api_key)
+        self.client = OpenAI(api_key=self.api_key, base_url="https://openrouter.ai/api/v1")
         logger.info(f"Initialized GroqClient with model: {self.model}")
     
     def generate_text(
@@ -162,9 +163,9 @@ class HuggingFaceClient:
         self.model = model or config.default_image_model
         
         if not self.token:
-            raise ValueError("HuggingFace token not provided")
+            logger.warning("HUGGINGFACE_TOKEN is not set; image requests will fail and panels will be gray placeholders")
         
-        self.api_url = f"https://api-inference.huggingface.co/models/{self.model}"
+        self.api_url = f"https://router.huggingface.co/hf-inference/models/{self.model}"
         self.headers = {"Authorization": f"Bearer {self.token}"}
         logger.info(f"Initialized HuggingFaceClient with model: {self.model}")
     
@@ -211,7 +212,8 @@ class HuggingFaceClient:
             logger.debug(f"Generated image for prompt: {prompt[:50]}...")
             return response.content
         except Exception as e:
-            logger.error(f"Error generating image with HuggingFace: {e}")
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            logger.warning(f"HuggingFace image request failed (HTTP {status}); panel will be a gray placeholder: {e}")
             raise
     
     def generate_text(
