@@ -1,0 +1,10 @@
+# Minimal runtime for the comic page pipeline (book_comic, generation, layout, utils).
+# Versions pinned to the tested local environment. The full requirements.txt
+# (torch, chromadb, langchain, ...) is not needed for comics.
+loguru==0.7.3
+numpy==2.4.6
+openai==3.36.1
+pillow==13.0.0
+pydantic==2.14.1
+python-dotenv==1.2.4
+requests==2.34.2

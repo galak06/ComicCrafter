@@ -1,0 +1,16 @@
+.env
+.env.*
+.git
+venv/
+.venv/
+output/
+data/
+tests/
+examples/
+evaluation/
+**/__pycache__/
+*.pyc
+*.png
+*.jpg
+*.jpeg
+*.pdf
