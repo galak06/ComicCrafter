@@ -153,6 +153,56 @@ status = client.wait_for_completion(job_id)
 files = client.download_all_outputs(job_id, Path("./output"))
 ```
 
+## 📕 Book Comics (`book_comic`)
+
+`book_comic` turns a book PDF into one comic page per chapter plus a cover
+(`examples/book_example.py`, Celery task `generate_book_comic`). It needs only
+`requirements.comic.txt` and `OPENROUTER_API_KEY` / `OPENROUTER_MODEL`
+(optional `OPENROUTER_IMAGE_MODEL`, `OPENROUTER_VISION_MODEL`).
+
+- **Bubble kinds**: each dialogue line has a `bubble`: `speech`, `thought`, `shout`, `whisper`,
+  `broadcast`, `fear` or `song`, each with its own outline, tail and text size. Unknown or missing
+  kinds are drawn as speech. The script writer picks one per line.
+- **Lettering**: a bundled Hebrew + Latin font (`assets/fonts/Assistant-SemiBold.ttf`), so Latin names
+  inside Hebrew text are drawn on any system. Use your own with `RenderOptions(font_path=...)` or
+  `render_dialogue(..., font_path=...)`. Captions wrap at 40% of the panel width. They go in the corner
+  the vision model picks, unless that corner covers a speaker's head. A caption in the corner read
+  second keeps the band above its bottom free of bubbles, so the caption is read first. An optional
+  `note` is drawn in the last-read bottom corner.
+- **Image quality**: the writer starts every scene with a shot label. Panel 1 must be an establishing
+  shot and every page needs at least two different shots; a page that breaks this rule is written once
+  more. Image prompts include the comic craft rules, a strong no-text rule and the book's recurring
+  props. The pipeline draws a character sheet once per book. Each panel then gets the sheet, the
+  previous panel and an optional photo as reference images. A vision check redraws art once if the
+  model painted text into it. Image and vision costs are counted in `cost_usd`.
+- **Cover**: `cover.png` is drawn from `cast.json`'s `cover`, using page one's panels as a reference
+  strip. A seam (a second strip stacked on top) is detected and cropped off. Art whose head sits too
+  high for the title gets one more try, and the better of the two attempts is kept. The cover is
+  lettered with a shade, a one-line shadowed title, a starring line and a footer. It is placed first
+  in the PDF.
+- **Print size** (optional): `book_comic.render.print_layouts()` gives 6.875 × 10.5 in pages
+  (2063 × 3150 px), and `RenderOptions(dpi=PRINT_DPI)` tags the PNGs at 300 DPI.
+
+`RenderOptions` defaults reproduce the plain renderer: one call per panel, no references and a gray
+placeholder when an image fails. Set `fail_on_image_error=True` to raise instead. The pipeline turns on
+`sheet_path`, `chain_panels` and `check_art` (`book_comic.pipeline.default_options`). Pass
+`options=RenderOptions()` for the plain renderer.
+
+Script fields (all optional; older `cast.json` / `script_NN.json` files still work):
+
+| Field | Where | Meaning |
+|---|---|---|
+| `props[{name, look}]` | `cast.json` | Recurring objects, drawn the same in every panel and on the cover |
+| `language` | `cast.json` | `he`, `en`, ... overrides reading direction (default: detected from the text) |
+| `cover{scene, title, starring, footer, title_font}` | `cast.json` | Cover art direction and lettering; `title_font` is a bundled font file name or a font path |
+| `dialogue[].bubble` | `script_NN.json` | Bubble kind (default `speech`) |
+| `note` | `script_NN.json` panel | Dedication caption in the bottom corner |
+
+Run the tests with `pytest -q` (no network calls; fake clients).
+
+The bundled fonts (Assistant, Rubik) are licensed under the SIL Open Font License 1.1; the licence
+texts are in `assets/fonts/`.
+
 ## 📖 Documentation
 
 ### Project Structure

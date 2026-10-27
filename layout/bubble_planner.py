@@ -1,21 +1,14 @@
 """Vision-based placement of speech bubbles relative to the speaking characters."""
 
-import base64
-import json
-import os
 from dataclasses import dataclass
-from io import BytesIO
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
-import requests
 from PIL import Image
 
+from generation.vision_client import DEFAULT_MODEL, VisionClient, encode_image  # noqa: F401
 from utils import get_logger
 
 logger = get_logger(__name__)
-
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "google/gemini-3.1-flash-lite"
 
 Point = Tuple[float, float]  # normalized 0-1 (x, y)
 
@@ -27,14 +20,21 @@ class BubblePlan:
     Attributes:
         speakers: For each dialogue line, the speaker's mouth position (None if not visible)
         bubbles: For each dialogue line, the bubble center in empty space
-        caption_corner: "top-left" or "top-right"
+        caption_corner: "top-left" or "top-right" as chosen by the model; None lets the renderer
+            start from the corner read first
     """
     speakers: List[Optional[Point]]
     bubbles: List[Point]
-    caption_corner: str = "top-left"
+    caption_corner: Optional[str] = None
 
 
-def _prompt(lines: List[Tuple[str, str]], has_caption: bool, rtl: bool = False) -> str:
+def _prompt(
+    lines: List[Tuple[str, str]], has_caption: bool, rtl: bool = False, reserved_corners: Sequence[str] = ()
+) -> str:
+    keep_clear = (
+        f"\nCaption boxes may cover the {' and '.join(reserved_corners)} corners; keep bubbles out of them."
+        if reserved_corners else ""
+    )
     order = "further right (this comic reads right-to-left)" if rtl else "further left"
     numbered = "\n".join(f'{i + 1}. {speaker or "unknown"}: "{text}"' for i, (speaker, text) in enumerate(lines))
     return f"""This is a comic book panel. Speech bubbles will be drawn on it for these lines:
@@ -45,16 +45,13 @@ For each line, find the speaking character in the image and return:
 - "bubble": [x, y] center for the bubble in EMPTY space near the speaker (sky, background, wall),
   never covering any face or the main action, ideally above or beside the speaker's head.
   Bubbles for different lines must not overlap; earlier lines go higher and {order}.
-{'Also pick "caption": "top-left" or "top-right", whichever corner covers less of the important art.' if has_caption else ''}
+{f'A narration caption box goes in the {"top-right" if rtl else "top-left"} corner; keep bubbles out of it.' if has_caption else ''}{keep_clear}
 
 Coordinates are integers from 0 to 1000 (0,0 is top-left, 1000,1000 bottom-right).
-Respond with only JSON: {{"lines": [{{"mouth": [x, y], "bubble": [x, y]}}], "caption": "top-left"}}"""
+Respond with only JSON: {{"lines": [{{"mouth": [x, y], "bubble": [x, y]}}]}}"""
 
 
-def _encode(image: Image.Image) -> str:
-    buffer = BytesIO()
-    image.convert("RGB").save(buffer, format="JPEG", quality=85)
-    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+_encode = encode_image
 
 
 def _point(value) -> Optional[Point]:
@@ -65,44 +62,29 @@ def _point(value) -> Optional[Point]:
 
 
 def plan_bubbles(
-    image: Image.Image, lines: List[Tuple[str, str]], has_caption: bool, rtl: bool = False
+    image: Image.Image,
+    lines: List[Tuple[str, str]],
+    has_caption: bool,
+    rtl: bool = False,
+    vision: Optional[VisionClient] = None,
+    reserved_corners: Sequence[str] = (),
 ) -> Optional[BubblePlan]:
     """Ask a vision model where each speaker is and where their bubble fits.
 
     Args:
         image: Panel image
         lines: (speaker, text) for each dialogue line; speaker may include a short look description
-        has_caption: Whether the panel also has a narration caption
+        has_caption: Whether the panel also has a narration caption (kept in the reading-first corner)
         rtl: Whether the comic reads right-to-left
+        vision: Vision client (its cost is recorded there); a default VisionClient if None
+        reserved_corners: Corners taken by other boxes (e.g. a dedication note), kept bubble-free
 
     Returns:
         BubblePlan, or None if the request or response failed
     """
-    model = os.getenv("OPENROUTER_VISION_MODEL", DEFAULT_MODEL)
-    payload = {
-        "model": model,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": _prompt(lines, has_caption, rtl)},
-                {"type": "image_url", "image_url": {"url": _encode(image)}},
-            ],
-        }],
-        "response_format": {"type": "json_object"},
-    }
-
+    vision = vision or VisionClient()
     try:
-        response = requests.post(
-            OPENROUTER_URL,
-            headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"},
-            json=payload,
-            timeout=60,
-        )
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"].strip()
-        # Models sometimes return the bare lines array instead of the wrapping object
-        start = min(i for i in (content.find("{"), content.find("[")) if i != -1)
-        data = json.loads(content[start:max(content.rfind("}"), content.rfind("]")) + 1])
+        data = vision.ask_json(_prompt(lines, has_caption, rtl, reserved_corners), image)
         if isinstance(data, list):
             data = {"lines": data}
 
@@ -114,14 +96,14 @@ def plan_bubbles(
         if any(b is None for b in bubbles):
             raise ValueError("missing bubble position")
 
-        corner = data.get("caption", "top-left")
+        corner = data.get("caption")
         return BubblePlan(
             speakers=[_point(p.get("mouth")) for p in planned[:len(lines)]],
             bubbles=bubbles,
-            caption_corner=corner if corner in ("top-left", "top-right") else "top-left",
+            caption_corner=corner if corner in ("top-left", "top-right") else None,
         )
     except Exception as e:
-        logger.warning(f"Bubble planning with {model} failed; using default placement: {e}")
+        logger.warning(f"Bubble planning with {vision.model} failed; using default placement: {e}")
         return None
 
 
