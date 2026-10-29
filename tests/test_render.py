@@ -70,6 +70,25 @@ def test_art_with_painted_text_is_drawn_once_more():
     assert len(images.calls) == 1  # a failed check never blocks the art
 
 
+def test_art_with_a_third_hand_is_drawn_once_more_with_the_anatomy_rule():
+    red, blue = Image.new("RGB", (10, 10), "red"), Image.new("RGB", (10, 10), "blue")
+    images = FakeImages([red, blue])
+    art = draw_checked(images, FakeVision(lambda p, i: {"has_text": False, "bad_anatomy": True}), "scene", [], "2:3")
+    assert art.getpixel((0, 0)) == (0, 0, 255) and len(images.calls) == 2
+    assert images.calls[1]["prompt"].startswith("scene Human anatomy:")
+    assert "Absolutely no writing" not in images.calls[1]["prompt"]  # only the broken rule is repeated
+    images = FakeImages([red, blue])
+    assert draw_checked(images, FakeVision(lambda p, i: {"has_text": False, "bad_anatomy": False}), "scene", [], "2:3") \
+        .getpixel((0, 0)) == (255, 0, 0) and len(images.calls) == 1
+
+
+def test_every_drawing_of_a_person_asks_for_ordinary_human_anatomy():
+    from book_comic.image_prompts import panel_prompt, sheet_prompt
+    rule = "exactly two arms and two hands"
+    assert rule in panel_prompt(CAST, {"scene": "Medium shot: Dana works"}, "Dana: red coat")
+    assert rule in sheet_prompt(CAST, CAST["characters"][0])
+
+
 def test_bubble_kinds_and_notes_reach_the_lettering(tmp_path):
     panel = {**OLD_PANEL, "dialogue": [{"speaker": "Omer", "text": "Hi", "bubble": "shout"}], "note": "With love"}
     vision = FakeVision(lambda p, i: [{"mouth": [500, 500], "bubble": [500, 200]}])

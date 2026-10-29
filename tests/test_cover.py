@@ -45,16 +45,19 @@ def test_the_cover_reference_shows_all_page_panels_in_order():
     (["seamed", "high"], 2, "blue", True),
     (["texted", "low"], 2, "red", False),
     (["texted", "high"], 2, "blue", True),
+    (["handed", "low"], 2, "red", False),  # a third hand: drawn once more, the sound art kept
 ])
 def test_cover_redraws_once_and_keeps_the_better_art(tmp_path, noise, monkeypatch, names, calls, colour, at_bottom):
     clean = noise()
     arts = {"clean": clean, "seamed": seamed(clean), "low": Image.new("RGB", (400, 600), "red"),
-            "high": Image.new("RGB", (400, 600), "blue"), "texted": Image.new("RGB", (400, 600), "green")}
+            "high": Image.new("RGB", (400, 600), "blue"), "texted": Image.new("RGB", (400, 600), "green"),
+            "handed": Image.new("RGB", (400, 600), "yellow")}
     heads = {(255, 0, 0): 0.4, (0, 0, 255): 0.1}
 
     def inspect(prompt, art):
         pixel = art.getpixel((0, 0))
-        return {"head_top": heads.get(pixel, 0.5) * 1000, "has_text": pixel == (0, 128, 0)}
+        return {"head_top": heads.get(pixel, 0.5) * 1000, "has_text": pixel == (0, 128, 0),
+                "bad_anatomy": pixel == (255, 255, 0)}
 
     lettered, bottoms = [], []
     monkeypatch.setattr(cover_module, "letter_cover",
@@ -70,6 +73,7 @@ def test_cover_redraws_once_and_keeps_the_better_art(tmp_path, noise, monkeypatc
         assert art.getpixel((0, 0)) == Image.new("RGB", (1, 1), colour).getpixel((0, 0))
     prompt = images.calls[0]["prompt"]
     assert "small brass hurricane lantern" in prompt and "Absolutely no writing" in prompt
+    assert "exactly two arms and two hands" in prompt
     assert "reference image 2 is the first page's panels" in prompt and len(images.calls[0]["references"]) == 2
 
 
