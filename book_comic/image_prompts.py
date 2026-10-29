@@ -5,7 +5,7 @@ None of the lettering (captions, dialogue, titles) is ever sent to the image mod
 
 from typing import Dict, Sequence
 
-from book_comic.comic_rules import NO_TEXT_RULE, PANEL_RULES, props_rule
+from book_comic.comic_rules import ANATOMY_RULE, NO_TEXT_RULE, PANEL_RULES, props_rule
 
 NO_TEXT = (
     "a single full-bleed illustration filling the whole canvas edge to edge: no border, no frame, "
@@ -28,6 +28,7 @@ PANEL_CRAFT = (
     "depth, coherent perspective, motivated lighting and readable contrast around the focal action. Keep hands "
     "anatomically plausible and gaze directed toward the action. Avoid duplicate limbs, merged objects and extra "
     "copies of a character. Do not invent scars, moles, jewelry or costume changes that are not described. "
+    f"{ANATOMY_RULE}"
 )
 
 
@@ -73,7 +74,7 @@ def sheet_prompt(cast: Dict, character: Dict, roles: Sequence[str] = ()) -> str:
         "separate from the torso, and clothing layers and accessories are easy to identify. Use natural proportions "
         "for the character's age, one coherent illustrated medium, clean facial detail and a few crisp clothing and "
         f"hair details. Character: {character.get('name_en', '')}: {character.get('look', '')}. "
-        f"Style: {cast.get('style', 'detailed comic book art')}. {NO_TEXT_RULE}"
+        f"Style: {cast.get('style', 'detailed comic book art')}. {ANATOMY_RULE}{NO_TEXT_RULE}"
     )
 
 
@@ -98,5 +99,5 @@ def cover_prompt(cast: Dict, cover: Dict, roles: Sequence[str] = ()) -> str:
         "borders, frames or dividing lines. Show the main character from the knees up or full length, standing lower "
         "in the frame: the top of the head is about one third of the way down the canvas, with more of the setting "
         "(its sky, ceiling or upper wall) above it, and let the bottom edge fade slightly darker. "
-        f"{props_rule(cast)}{NO_TEXT_RULE}"
+        f"{props_rule(cast)}{ANATOMY_RULE}{NO_TEXT_RULE}"
     )

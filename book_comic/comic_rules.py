@@ -26,6 +26,14 @@ COMIC_BUBBLE_RULE = (
     '"speech"; use the others only when the line calls for them.'
 )
 
+# Image rule for every drawing of a person (panels, sheets, covers): the genre never changes a human body
+ANATOMY_RULE = (
+    "Human anatomy: every person is an ordinary human, whatever the genre: exactly two arms and two hands, each "
+    "hand with five fingers on its own arm, two legs, one head. Count each person's hands before finishing; never "
+    "add a third arm or hand, even when they hold or operate several things at once. Gadgets, armour or tools are "
+    "worn on or held by a normal limb and never replace or add one. "
+)
+
 # Image rules for every story panel. Never mention "title" or "caption text" here: naming lettering
 # makes the image model paint its own.
 PANEL_RULES = (

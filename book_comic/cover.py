@@ -102,13 +102,13 @@ def render_cover(
     for _ in range(ATTEMPTS):
         art = ImageOps.fit(request_art(images, prompt, references, closest_aspect_ratio(*size)), size)
         seam = find_seam(art)
-        found = inspect_art(art, vision) if seam is None else {"head_top": None, "has_text": None}
+        found = inspect_art(art, vision) if seam is None else {"head_top": None, "has_text": None, "bad_anatomy": None}
         head = found["head_top"] if found["head_top"] is not None else 1.0
-        clean = not found["has_text"]
+        clean = not found["has_text"] and not found["bad_anatomy"]
         candidates.append((seam is None, clean, head, art, seam))
         if seam is None and clean and head >= HEAD_TOP_MIN:
             break
-        logger.info(f"Cover attempt rejected (seam={seam}, text={found['has_text']}, head_top={head:.2f})")
+        logger.info(f"Cover attempt rejected (seam={seam}, text={found['has_text']}, anatomy={found['bad_anatomy']}, head_top={head:.2f})")
     _, _, head, art, seam = max(candidates, key=lambda c: (c[0], c[1], c[2]))
     if seam is not None:
         art = ImageOps.fit(art.crop((0, seam, art.width, art.height)), size, centering=(0.5, 0.0))
