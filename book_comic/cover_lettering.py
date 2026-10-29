@@ -88,29 +88,40 @@ def _shadowed_text(page: Image.Image, text: str, font, max_width: int, y: int, a
     return th
 
 
-def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = None) -> Image.Image:
+def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = None, title_at_bottom: bool = False) -> Image.Image:
     """Letter the cover art.
 
     Args:
         image: Cover art
         cover: {"title", optional "starring", "footer", "title_font" (bundled file name or font path)}
         fonts: Faces to use; cover["title_font"] overrides the title face
+        title_at_bottom: Stack the title and starring line just above the footer instead of at the top,
+            for art whose head reaches up into the title block (the title must never cover the face)
     """
     fonts = fonts or CoverFonts()
     page = image.convert("RGBA")
     page.alpha_composite(_cover_shade(page.size))
     w, h = page.size
     margin = max(12, h // 18)
+    gap, bottom = h // 50, h - margin // 2
+    if cover.get("footer"):
+        font = ImageFont.truetype(str(fonts.footer), max(14, int(h * 0.022)))
+        fh = _shadowed_text(page, cover["footer"], font, int(w * 0.8), bottom, align_bottom=True, blur=max(3, h // 400))
+        bottom -= fh + gap
     title = cover.get("title", "")
-    th = 0
+    title_font = None
     if title:
         path = resolve_font(cover.get("title_font"), fonts.title)
         size = int(w * cover_title_scale(title) * fonts.title_scale)
-        th = _shadowed_text(page, title, one_line_font(path, title, size, int(w * 0.88)), w, margin, blur=max(4, h // 250))
-    if cover.get("starring"):
-        font = ImageFont.truetype(str(fonts.starring), max(18, int(h * 0.026)))
-        _shadowed_text(page, cover["starring"], font, int(w * 0.8), margin + th + h // 50, blur=max(3, h // 400))
-    if cover.get("footer"):
-        font = ImageFont.truetype(str(fonts.footer), max(14, int(h * 0.022)))
-        _shadowed_text(page, cover["footer"], font, int(w * 0.8), h - margin // 2, align_bottom=True, blur=max(3, h // 400))
+        title_font = one_line_font(path, title, size, int(w * 0.88))
+    starring_font = ImageFont.truetype(str(fonts.starring), max(18, int(h * 0.026))) if cover.get("starring") else None
+    if title_at_bottom:  # starring right above the footer, the title above it, both in the bottom shade
+        if starring_font:
+            bottom -= _shadowed_text(page, cover["starring"], starring_font, int(w * 0.8), bottom, align_bottom=True, blur=max(3, h // 400)) + gap
+        if title_font:
+            _shadowed_text(page, title, title_font, w, bottom, align_bottom=True, blur=max(4, h // 250))
+        return page.convert("RGB")
+    th = _shadowed_text(page, title, title_font, w, margin, blur=max(4, h // 250)) if title_font else 0
+    if starring_font:
+        _shadowed_text(page, cover["starring"], starring_font, int(w * 0.8), margin + th + gap, blur=max(3, h // 400))
     return page.convert("RGB")

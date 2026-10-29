@@ -109,11 +109,12 @@ def render_cover(
         if seam is None and clean and head >= HEAD_TOP_MIN:
             break
         logger.info(f"Cover attempt rejected (seam={seam}, text={found['has_text']}, head_top={head:.2f})")
-    _, _, _, art, seam = max(candidates, key=lambda c: (c[0], c[1], c[2]))
+    _, _, head, art, seam = max(candidates, key=lambda c: (c[0], c[1], c[2]))
     if seam is not None:
         art = ImageOps.fit(art.crop((0, seam, art.width, art.height)), size, centering=(0.5, 0.0))
 
     dpi_tag = {"dpi": (dpi, dpi)} if dpi else {}
-    letter_cover(art, cover, fonts).save(path, format="PNG", optimize=True, **dpi_tag)
+    # Every attempt drew the head up in the title block: letter the title at the bottom, never over the face.
+    letter_cover(art, cover, fonts, title_at_bottom=head < HEAD_TOP_MIN).save(path, format="PNG", optimize=True, **dpi_tag)
     logger.info(f"Saved cover {path}")
     return path

@@ -35,18 +35,18 @@ def test_the_cover_reference_shows_all_page_panels_in_order():
         [(200, 0, 0), (0, 200, 0), (0, 0, 200)]
 
 
-@pytest.mark.parametrize("names, calls, colour", [
-    (["clean"], 1, None),
-    (["seamed", "clean"], 2, None),
-    (["seamed", "seamed"], 2, None),  # both seamed: the seam is cut off
-    (["high", "low"], 2, "red"),
-    (["high", "high"], 2, "blue"),  # both too high: the second (equal) is fine, the head check never fails the job
-    (["low"], 1, "red"),
-    (["seamed", "high"], 2, "blue"),
-    (["texted", "low"], 2, "red"),
-    (["texted", "high"], 2, "blue"),
+@pytest.mark.parametrize("names, calls, colour, at_bottom", [
+    (["clean"], 1, None, False),
+    (["seamed", "clean"], 2, None, False),
+    (["seamed", "seamed"], 2, None, False),  # both seamed: the seam is cut off
+    (["high", "low"], 2, "red", False),
+    (["high", "high"], 2, "blue", True),  # both too high: never fails the job, the title moves to the bottom
+    (["low"], 1, "red", False),
+    (["seamed", "high"], 2, "blue", True),
+    (["texted", "low"], 2, "red", False),
+    (["texted", "high"], 2, "blue", True),
 ])
-def test_cover_redraws_once_and_keeps_the_better_art(tmp_path, noise, monkeypatch, names, calls, colour):
+def test_cover_redraws_once_and_keeps_the_better_art(tmp_path, noise, monkeypatch, names, calls, colour, at_bottom):
     clean = noise()
     arts = {"clean": clean, "seamed": seamed(clean), "low": Image.new("RGB", (400, 600), "red"),
             "high": Image.new("RGB", (400, 600), "blue"), "texted": Image.new("RGB", (400, 600), "green")}
@@ -56,14 +56,16 @@ def test_cover_redraws_once_and_keeps_the_better_art(tmp_path, noise, monkeypatc
         pixel = art.getpixel((0, 0))
         return {"head_top": heads.get(pixel, 0.5) * 1000, "has_text": pixel == (0, 128, 0)}
 
-    lettered = []
-    monkeypatch.setattr(cover_module, "letter_cover", lambda art, c, f: lettered.append(art) or art)
+    lettered, bottoms = [], []
+    monkeypatch.setattr(cover_module, "letter_cover",
+                        lambda art, c, f, title_at_bottom: lettered.append(art) or bottoms.append(title_at_bottom) or art)
     images = FakeImages([arts[n] for n in names])
     render_cover(CAST, COVER, (400, 600), tmp_path / "cover.png", images, FakeVision(inspect),
                  panels=[Image.new("RGB", (300, 150))], references=["data:sheet"], reference_roles=["sheet"])
     assert len(images.calls) == calls
     art = lettered[0]
     assert art.size == (400, 600) and find_seam(art) is None
+    assert bottoms == [at_bottom]
     if colour:
         assert art.getpixel((0, 0)) == Image.new("RGB", (1, 1), colour).getpixel((0, 0))
     prompt = images.calls[0]["prompt"]
@@ -77,6 +79,17 @@ def test_cover_lettering_shades_the_top_and_leaves_the_middle(tmp_path):
     assert sum(lettered.getpixel((5, 5))) < 600
     assert lettered.getpixel((5, 300)) == (255, 255, 255)
     assert letter_cover(art, {"title": "Only a title"}).size == art.size  # starring and footer are optional
+
+
+def test_a_high_head_moves_the_title_to_the_bottom_and_leaves_the_face_clear():
+    art = Image.new("RGB", (400, 600), (90, 120, 160))
+    shade_only = letter_cover(art, {"footer": "With love"})
+    top = letter_cover(art, {**COVER, "footer": "With love"})
+    low = letter_cover(art, {**COVER, "footer": "With love"}, title_at_bottom=True)
+    lettered = lambda img, rows: sum(img.getpixel((x, y)) != shade_only.getpixel((x, y)) for x in range(400) for y in rows)
+    upper, lower = range(0, 200), range(380, 600)
+    assert lettered(top, upper) > 0 and lettered(low, upper) == 0  # nothing lettered where the head is
+    assert lettered(top, lower) == 0 and lettered(low, lower) > 0  # the title and starring line sit at the bottom
 
 
 def test_cover_fonts_are_bundled_and_a_title_font_choice_falls_back():
