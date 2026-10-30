@@ -34,7 +34,8 @@ class RenderOptions:
     Attributes:
         font_path: Lettering font file for bubbles, captions and notes (default: bundled + system fonts)
         fail_on_image_error: Raise when an image call fails instead of drawing a gray placeholder
-        check_art: Ask the vision model whether the art has painted-in writing, and redraw it once if so
+        check_art: Ask the vision model whether the art (and the character sheet) has painted-in writing or extra
+            hands, and redraw it if so, up to three draws in all, keeping the best
         chain_panels: Send the previous panel of the page as a reference, for continuity
         photo: Reference photo of the main character (http or data: URL)
         sheet_path: Where the main character's sheet is drawn once (and reused); it is then a reference
@@ -108,7 +109,11 @@ class PageRenderer:
             references = [self.options.photo] if self.options.photo else []
             prompt = sheet_prompt(self.cast, self.cast["characters"][0], ["photo"] if references else [])
             try:
-                request_art(self.images, prompt, references, "2:3").save(path)
+                if self.options.check_art:
+                    sheet = draw_checked(self.images, self.vision, prompt, references, "2:3")
+                else:
+                    sheet = request_art(self.images, prompt, references, "2:3")
+                sheet.save(path)
             except Exception as e:
                 if self.options.fail_on_image_error:
                     raise

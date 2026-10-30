@@ -24,7 +24,8 @@ class FakeImages:
         self.total_cost = 0.0
 
     def generate_image(self, prompt, negative_prompt=None, aspect_ratio=None, references=(), **kwargs) -> bytes:
-        self.calls.append({"prompt": prompt, "aspect_ratio": aspect_ratio, "references": list(references)})
+        self.calls.append({"prompt": prompt, "aspect_ratio": aspect_ratio, "references": list(references),
+                           "negative_prompt": negative_prompt})
         if self.error:
             raise self.error
         image = self.queue.pop(0) if len(self.queue) > 1 else self.queue[0]

@@ -173,8 +173,8 @@ files = client.download_all_outputs(job_id, Path("./output"))
   shot and every page needs at least two different shots; a page that breaks this rule is written once
   more. Image prompts include the comic craft rules, a strong no-text rule and the book's recurring
   props. The pipeline draws a character sheet once per book. Each panel then gets the sheet, the
-  previous panel and an optional photo as reference images. A vision check redraws art once if the
-  model painted text into it. Image and vision costs are counted in `cost_usd`.
+  previous panel and an optional photo as reference images. A vision check redraws art (up to three draws, the best kept) if the
+  model painted text or an extra hand into it; the character sheet is checked the same way. Image and vision costs are counted in `cost_usd`.
 - **Cover**: `cover.png` is drawn from `cast.json`'s `cover`, using page one's panels as a reference
   strip. A seam (a second strip stacked on top) is detected and cropped off. Art whose head sits too
   high for the title gets one more try, and the better of the two attempts is kept. The cover is
