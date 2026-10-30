@@ -3,7 +3,7 @@
 import pytest
 from PIL import Image
 
-from book_comic.art_check import draw_checked
+from book_comic.art_check import draw_checked, inspect_art
 from book_comic.book_text import Chapter
 from book_comic.render import PageRenderer, RenderOptions
 from book_comic.script import ScriptWriter
@@ -60,7 +60,7 @@ def test_sheet_photo_and_previous_panel_are_references(tmp_path):
 def test_art_with_painted_text_is_drawn_once_more():
     red, blue = Image.new("RGB", (10, 10), "red"), Image.new("RGB", (10, 10), "blue")
     images = FakeImages([red, blue])
-    art = draw_checked(images, FakeVision(lambda p, i: {"has_text": True}), "scene", ["ref"], "2:3")
+    art = draw_checked(images, FakeVision(lambda p, i: {"has_text": i.getpixel((0, 0)) == (255, 0, 0)}), "scene", ["ref"], "2:3")
     assert art.getpixel((0, 0)) == (0, 0, 255) and len(images.calls) == 2
     assert "Absolutely no writing" in images.calls[1]["prompt"]
     images = FakeImages([red, blue])
@@ -73,7 +73,7 @@ def test_art_with_painted_text_is_drawn_once_more():
 def test_art_with_a_third_hand_is_drawn_once_more_with_the_anatomy_rule():
     red, blue = Image.new("RGB", (10, 10), "red"), Image.new("RGB", (10, 10), "blue")
     images = FakeImages([red, blue])
-    art = draw_checked(images, FakeVision(lambda p, i: {"has_text": False, "bad_anatomy": True}), "scene", [], "2:3")
+    art = draw_checked(images, FakeVision(lambda p, i: {"has_text": False, "bad_anatomy": i.getpixel((0, 0)) == (255, 0, 0)}), "scene", [], "2:3")
     assert art.getpixel((0, 0)) == (0, 0, 255) and len(images.calls) == 2
     assert images.calls[1]["prompt"].startswith("scene Human anatomy:")
     assert "Absolutely no writing" not in images.calls[1]["prompt"]  # only the broken rule is repeated
@@ -116,3 +116,74 @@ def test_the_writer_retries_once_for_the_camera_rule():
     assert '"bubble"' in prompts[0] and "shots_not_varied" in prompts[1]
     answers[:] = [flat, flat]
     assert writer.script_chapter(Chapter(1, "Start", "text"), cast) == flat["panels"]  # kept, not lost
+
+
+def colours(*names):
+    return [Image.new("RGB", (10, 10), n) for n in names]
+
+
+def judge(flags):
+    """Vision fake: the answer for each colour of art, by its top-left pixel."""
+    return FakeVision(lambda p, i: flags.get(i.getpixel((0, 0)), {}))
+
+
+RED, GREEN, BLUE = (255, 0, 0), (0, 128, 0), (0, 0, 255)
+HANDS, TEXT, CLEAN = {"bad_anatomy": True}, {"has_text": True}, {}
+
+
+def test_a_third_draw_happens_when_the_second_is_still_bad():
+    images = FakeImages(colours("red", "green", "blue"))
+    art = draw_checked(images, judge({RED: HANDS, GREEN: HANDS, BLUE: CLEAN}), "scene", [], "2:3")
+    assert art.getpixel((0, 0)) == BLUE and len(images.calls) == 3
+
+
+def test_the_best_of_three_is_kept_when_all_are_bad():
+    images = FakeImages(colours("red", "green", "blue"))
+    both = {"bad_anatomy": True, "has_text": True}
+    art = draw_checked(images, judge({RED: both, GREEN: TEXT, BLUE: HANDS}), "scene", [], "2:3")
+    assert art.getpixel((0, 0)) == GREEN and len(images.calls) == 3  # no extra hands beats no text
+    images = FakeImages(colours("red", "green", "blue"))
+    art = draw_checked(images, judge({RED: HANDS, GREEN: HANDS, BLUE: HANDS}), "scene", [], "2:3")
+    assert art.getpixel((0, 0)) == RED  # a tie keeps the earliest
+
+
+def test_a_clean_first_draw_costs_one_image_and_one_vision_call():
+    images, vision = FakeImages(colours("red")), judge({})
+    draw_checked(images, vision, "scene", [], "2:3")
+    assert len(images.calls) == 1 and len(vision.prompts) == 1
+
+
+def test_only_redraws_carry_the_negative_prompt():
+    images = FakeImages(colours("red", "blue"))
+    draw_checked(images, judge({RED: HANDS}), "scene", [], "2:3")
+    first, second = images.calls
+    assert first["negative_prompt"] is None and first["prompt"] == "scene"
+    assert "third hand" in second["negative_prompt"]
+
+
+@pytest.mark.parametrize("answer, bad", [
+    ({"has_text": False, "bad_anatomy": False, "people": 1, "hands_visible": 3}, True),
+    ({"has_text": False, "bad_anatomy": False, "people": 2, "hands_visible": 4}, False),
+    ({"has_text": False, "bad_anatomy": False, "people": 1, "hands_visible": 2}, False),
+    ({"has_text": False, "bad_anatomy": True, "people": 1, "hands_visible": 2}, True),
+    ({"has_text": False, "bad_anatomy": False}, False),
+    ({"bad_anatomy": False, "people": "one", "hands_visible": 9}, False),
+])
+def test_more_than_two_hands_per_person_is_bad_anatomy(answer, bad):
+    found = inspect_art(Image.new("RGB", (2000, 1000)), FakeVision(lambda p, i: answer))
+    assert found["bad_anatomy"] is bad and set(found) == {"head_top", "has_text", "bad_anatomy"}
+
+
+def test_the_sheet_is_redrawn_when_flagged_and_drawn_once_when_clean(tmp_path):
+    images = FakeImages(colours("red", "blue"))
+    r = renderer(images, judge({RED: HANDS}), check_art=True, sheet_path=tmp_path / "bad.png")
+    r.character_sheet()
+    assert len(images.calls) == 2 and Image.open(tmp_path / "bad.png").getpixel((0, 0)) == BLUE
+    images = FakeImages(colours("red"))
+    r = renderer(images, judge({}), check_art=True, sheet_path=tmp_path / "ok.png")
+    r.character_sheet()
+    assert len(images.calls) == 1
+    images = FakeImages(colours("red"))  # without check_art the sheet is never inspected
+    vision = judge({RED: HANDS})
+    renderer(images, vision, sheet_path=tmp_path / "plain.png").character_sheet()
+    assert len(images.calls) == 1 and vision.prompts == []
