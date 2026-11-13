@@ -19,7 +19,7 @@ from book_comic.staging_tolerance import still_held
 logger = logging.getLogger(__name__)
 
 CHECK_NAMES = ("has_text", "bad_anatomy", "squashed_figure", "identity_mismatch", "design_mismatch", "scene_mismatch",
-               "requirement_mismatch", "prop_mismatch", "prop_shape_mismatch", "figure_visible")
+               "requirement_mismatch", "prop_mismatch", "prop_shape_mismatch", "figure_visible", "head_missing")
 UNAVAILABLE = "check_unavailable"
 MAX_SAVED = 12
 MAX_REASONS = 8

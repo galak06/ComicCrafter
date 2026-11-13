@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 HEAD_TOP_MIN = 0.2
 # A head above 8.5% of the height prints in the printers' top margin (12.7 mm inside the trim): BookPod's B5 cuts
 # 7.8 mm of the 256.8 mm art above the trim (20.8 mm, 8.1%), Lulu's comic 3.2 mm of 266.7 mm (6.1%). Such a draw is
-# drawn again while draws remain; it is never a reason to lose the cover (the last such draw is kept).
+# drawn again while draws remain; it is never a reason to lose the cover: when no later draw is accepted, whatever
+# went wrong with them (a headless revision, a defect, a check that did not answer), the sound draw is kept.
 HEAD_SAFE_MIN = 0.085
 HEADROOM_FIX = ("the camera is pulled back a little so the main character sits lower in the frame, with a clear stretch "
                 "of the setting (its sky, ceiling or upper wall), at least one eighth of the canvas height, above the top of the hair or hat")
@@ -46,6 +47,11 @@ def _skipped(audit, draw: int, reason: str) -> None:
     """A cover draw thrown away before the vision check is recorded, so a failed cover shows why it had fewer checks."""
     if audit is not None:
         audit.append({"accepted": False, "kind": "cover", "draw": draw, "skipped": reason, "requirements": [], "checks": {}})
+
+
+def _high_heads(rejected) -> list:
+    """Indexes of the draws set aside only because the head would print in the top margin: checked, sound art."""
+    return [i for i, (_, _, report) in enumerate(rejected) if report.get("head_in_margin")]
 
 
 def panel_strip(arts: Sequence[Image.Image], height: int = 512, gap: int = 16) -> Optional[Image.Image]:
@@ -80,7 +86,8 @@ def render_cover(
 
     Remove a seam locally, then accept only inspected art with matching identity, designs and scene.
     Unchecked or persistently rejected art raises. A high head moves lettering instead of causing a redraw;
-    only a head in the printers' top margin (HEAD_SAFE_MIN) is drawn again, and never fails the cover.
+    only a head in the printers' top margin (HEAD_SAFE_MIN) is drawn again, and never fails the cover: sound art
+    with a high head is kept when no later draw is accepted. A draw without a measurable head is a rejected draw.
 
     Args:
         cast: Character sheet (style, characters, optional props)
@@ -135,18 +142,24 @@ def render_cover(
                             props=cast.get("props", []), anchors=prop_anchors)
         if unasked_gloves(found, prompt):
             found = {**found, "gloves": True}
+        if found["head_top"] is None and type(found.get("has_text")) is bool:
+            # The check answered and found no head to measure: a hero cover without its hero's head (2026-11-13: a
+            # headroom revision drew the body alone). A defect of that draw, not a check that never ran.
+            found = {**found, "head_missing": True}
         report = {"accepted": None, "requirements": requirements, "checks": found, "kind": "cover", **({"revised": True} if revised else {})}
         if audit is not None:
             audit.append(report)
         try:
-            clean = require_checked(found, require_head=True)
+            clean = require_checked(found)
         except ArtCheckError:
             report_rejected(on_reject, draw, art, found, True, prompt, requirements)
-            raise
+            if not _high_heads(rejected):
+                raise
+            report["accepted"] = False  # unchecked art is never published, and the sound draw in hand is not thrown away for it
+            continue
         in_margin = clean and found["head_top"] < HEAD_SAFE_MIN
         report["accepted"] = clean and not in_margin
         if clean and not in_margin:
-            head = found["head_top"]
             break  # a high head is handled by local title placement, without another image call
         if in_margin:  # sound art whose head would print in the top margin: not a vision rejection, so not reported as one
             report["head_in_margin"] = True
@@ -154,13 +167,16 @@ def render_cover(
             report_rejected(on_reject, draw, art, found, False, prompt, requirements)
         rejected.append((art, found, report))
     else:
-        best = pick_fallback([(a, f) for a, f, _ in rejected], requirements)
+        # Sound art with a high head is better than any draw with a defect, and far better than no cover: the one
+        # whose head is lowest is kept (the lettering moves the title off it). Otherwise the least-bad draw.
+        high = _high_heads(rejected)
+        best = max(high, key=lambda i: (rejected[i][1]["head_top"], i)) if high else pick_fallback([(a, f) for a, f, _ in rejected], requirements)
         if best is None:
             raise ArtCheckError("comic_cover_rejected")
         art, found, report = rejected[best]
         report["fallback"] = True
-        head = found["head_top"]
-        logger.warning(f"Cover: every draw was rejected; keeping the least-bad one (draw {best + 1})")
+        logger.warning(f"Cover: no draw was accepted; keeping {'the sound one with the lowest head' if high else 'the least-bad one'} (draw {best + 1})")
+    head = found["head_top"]
 
     dpi_tag = {"dpi": (dpi, dpi)} if dpi else {}
     if art_path is not None:

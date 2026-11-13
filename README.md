@@ -213,7 +213,11 @@ Queue a job from Python with `generate_book_comic.delay("book.pdf", first_chapte
 - **Cover**: `cover.png` is drawn from `cast.json`'s `cover`, using page one's panels as a reference
   strip. A seam (a second strip stacked on top) is detected and cropped off. Art whose head sits too
   high for the title gets its title block at the bottom instead; a head in the printers' top margin
-  (above 8.5% of the height) is drawn again, and the last draw is kept if none clears it. The cover is
+  (above 8.5% of the height) is drawn again, and that rule never loses a cover: when no later draw is
+  accepted (a revision that came back worse, a defect, a check that did not answer), the sound draw whose
+  head is lowest is kept. A draw whose check finds no head at all (`head_missing`) is a rejected draw
+  like a wrong face, never published; a check that never answered still stops the cover when no sound
+  draw is in hand. The cover is
   lettered with a shade, a one-line shadowed title, a starring line and a footer, all inside the
   printers' text margin on the printed cover (`cover_lettering.SAFE_TOP`, `SAFE_BOTTOM`, `SAFE_WIDTH`:
   12.7 mm inside the trim after Lulu's and BookPod's cover crops). It is placed first in the PDF.
