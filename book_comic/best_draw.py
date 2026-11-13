@@ -5,8 +5,13 @@ fake bubbles or captions, a signature), broken anatomy, a different face and a s
 splits the picture: a scene_mismatch whose correction names a seam, divider, border or strip) are what a reader
 notices at once, so a draw with any of them is never published. Tiny or illegible pseudo-lettering (text_prominent False), even on a map
 or page the hero holds, is kept outright (inspect_art turns it into faint_text). The rest (scene, design,
-requirement and prop drift) is ranked: fewest failed check flags first, then fewest failed requirement
-checks, then the latest draw (a redraw carries the check's corrections).
+requirement and prop drift) is ranked: a draw without an extra person first (extra_person: someone the brief does
+not name, near the hero or in focus; staging_tolerance.extra_person), then fewest failed check flags, then fewest
+failed requirement checks, then the latest draw (a redraw carries the check's corrections).
+
+An extra person used to count as one scene_mismatch, the same as a drawer drawn closed, so a draw with a stranger
+beside the hero (1 flag, no failed row) beat a draw with a small staging miss the checker named twice (2 flags, 1
+row), and won every tie as the later draw. It is ranked, not hard: three draws with a stranger still give a page.
 """
 
 import re
@@ -37,14 +42,15 @@ def hard_defect(found: Dict) -> bool:
     return text or seam or bool(found.get("gloves")) or any(found.get(k) for k in HARD_DEFECTS)
 
 
-def _rank(found: Dict, requirements: Sequence[Dict]) -> Tuple[int, int]:
+def _rank(found: Dict, requirements: Sequence[Dict]) -> Tuple[int, int, int]:
     flags = sum(1 for k in CHECK_NAMES if found.get(k))
-    return flags, len(unmet_requirements(found, requirements))  # the same unmet-row rule as the check and the reasons
+    # A person who should not be there outweighs any number of staging misses; then the same unmet-row rule as the check.
+    return int(bool(found.get("extra_person"))), flags, len(unmet_requirements(found, requirements))
 
 
 def pick_fallback(rejected: Sequence[Tuple[object, Dict]], requirements: Sequence[Dict] = ()) -> Optional[int]:
     """Index of the least-bad rejected draw without a hard defect, or None when every draw has one."""
-    eligible: List[Tuple[Tuple[int, int], int]] = [
+    eligible: List[Tuple[Tuple[int, int, int], int]] = [
         (_rank(found, requirements), i) for i, (_, found) in enumerate(rejected) if not hard_defect(found)
     ]
     # A tie goes to the later draw: each redraw carries the check's corrections, so it is usually closer to the brief

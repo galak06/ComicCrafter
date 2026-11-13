@@ -39,6 +39,17 @@ BODY_NOTE = (
     "figure cut by the frame edge, foreshortening, a seated, kneeling or crouching pose, a child's natural proportions "
     "and the proportions the character sheet itself shows are not squashed; false when unsure."
 )
+# The least-bad pick (best_draw): a stranger in the picture is what a reader notices first, yet it was one
+# scene_mismatch like a drawer drawn closed. Its own answer, so the ranking can tell the two apart.
+EXTRA_PERSON_NOTE = (
+    " Also return extra_person: true when a person the brief does not name is drawn near the hero or in focus: a second "
+    "figure, a bystander a reader would notice, or a duplicate of the hero. False for a distant, faceless background "
+    "figure or silhouette, for the hero's own reflection or shadow, and when nobody else is drawn."
+)
+_PERSON = r"(?:persons?|people|m[ae]n|wom[ae]n|figures?|characters?|bystanders?|passers?-?by|child(?:ren)?|boys?|girls?|heroe?s?)"
+# "Remove the second person standing next to Hero": the removal's own object is a person, not their gloves.
+_REMOVE_PERSON = re.compile(rf"\b(?:remove|erase|delete|omit|get rid of|leave out)\s+(?:(?:the|that|this|any|all|an?)\s+)?"
+                            rf"(?:[\w-]+\s+){{0,2}}?{_PERSON}\b(?!['’]s)", re.I)
 
 _HOLDING = r"(?:holding|gripping|clutching|grasping|carrying|held|gripped|clutched|grasped|carried)"
 _HELD = re.compile(rf"\b(?:holds|grips|clutches|grasps|carries|{_HOLDING}|"
@@ -101,7 +112,8 @@ def advisory_staging(answer: Dict, found: Dict, context: str = "") -> bool:
 
 def reader_view(answer: Dict, found: Dict, context: str = "", strict: bool = False) -> Dict:
     """The check's answer as a reader would rule: a scene object's own marking and marks on a held map are not text
-    (never on the character sheet, strict), a grip or a knee crop is not a scene mismatch, a squashed figure is a defect."""
+    (never on the character sheet, strict), a grip or a knee crop is not a scene mismatch, a squashed figure is a defect,
+    and a rejected draw with a person who should not be there is marked extra_person for the least-bad pick."""
     if not strict and scene_marking_only(answer, found):  # the helipad's H
         found = {**found, "has_text": False, "scene_marking": True}
     elif not strict and prop_marks_only(answer, found):  # legend boxes and pseudo-lettering on the hero's map
@@ -110,7 +122,17 @@ def reader_view(answer: Dict, found: Dict, context: str = "", strict: bool = Fal
         found = {**found, "scene_mismatch": False, "staging_advisory": True}
     if answer.get("squashed_figure") is True:
         found = {**found, "squashed_figure": True}
+    if extra_person(answer, found):
+        found = {**found, "extra_person": True}
     return found
+
+
+def extra_person(answer: Dict, found: Dict) -> bool:
+    """The rejected draw shows a person who should not be there: the checker's own extra_person flag, or a correction
+    that asks to remove a person. Only with a scene_mismatch: a distant figure the check accepts is not marked."""
+    if found.get("scene_mismatch") is not True:
+        return False
+    return answer.get("extra_person") is True or any(_REMOVE_PERSON.search(c) for c in found.get("corrections") or [])
 
 
 def fresh_redraw(found: Optional[Dict]) -> bool:
