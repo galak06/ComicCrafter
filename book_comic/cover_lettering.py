@@ -134,7 +134,7 @@ def top_block_end(size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None) 
 
 
 def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = None, title_at_bottom: bool = False,
-                 badge: Optional[Union[CoverBadge, Dict]] = None) -> Image.Image:
+                 badge: Optional[Union[CoverBadge, Dict]] = None, head_top: Optional[float] = None) -> Image.Image:
     """Letter the cover art.
 
     Args:
@@ -147,6 +147,8 @@ def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = 
         badge: Optional picture drawn after the lettering in a corner that is clear of it (cover_badge.CoverBadge
             or the same fields as a dict). It never moves or resizes a line; with no clear corner or an unreadable
             file there is no badge. None (the default) letters the cover exactly as without this argument
+        head_top: The top of the hero's head as a share of the height, when measured. Only the badge uses it:
+            a free top corner above the head is preferred to the bottom band, where the figure stands
 
     Every line stays inside SAFE_TOP, SAFE_BOTTOM and SAFE_WIDTH, so none is printed in a printer's margin.
     """
@@ -175,5 +177,5 @@ def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = 
     if badge:
         # Reading direction as the lines themselves take it: from the first lettered text (CoverBadge.rtl overrides).
         rtl = is_rtl(next((cover[key] for key in ("title", "starring", "footer") if cover.get(key)), ""))
-        place_badge(page, badge, boxes, rtl, SAFE_BOTTOM, SAFE_WIDTH)
+        place_badge(page, badge, boxes, rtl, SAFE_BOTTOM, SAFE_WIDTH, art=image, head_top=head_top)
     return page.convert("RGB")

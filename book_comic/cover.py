@@ -112,7 +112,8 @@ def render_cover(
         art_path: Where to also save the chosen art unlettered (the back cover's style reference)
         badge: Optional picture (a brand mark) drawn on the lettered cover only, never on art_path:
             cover_badge.CoverBadge(path, width=0.14, position="bottom", rtl=None) or the same fields as a dict.
-            It goes in a print-safe corner clear of the lettering, or nowhere; it never changes a draw, the
+            It goes in a print-safe corner clear of the lettering and, as far as the measured head and the art
+            itself tell, of the figure (cover_badge.place_badge), or nowhere; it never changes a draw, the
             lettering or the outcome. None (the default) saves exactly the cover drawn without this argument
     """
     # A cover keeps its own framing: the prompt strips the scene's shot and limb-only clauses (image_prompts.cover_prompt);
@@ -192,7 +193,7 @@ def render_cover(
     badge, language = as_badge(badge), (cast.get("language") or "").lower()
     if badge and badge.rtl is None and language:  # the comic's language decides the corner, as it decides page lettering
         badge = replace(badge, rtl=language in RTL_LANGUAGES)
-    extra = {"badge": badge} if badge else {}
+    extra = {"badge": badge, "head_top": head} if badge else {}  # the badge keeps off the figure: above the measured head
     letter_cover(art, cover, fonts, title_at_bottom=title_goes_bottom(head, art.size, cover, fonts), **extra).save(path, format="PNG", optimize=True, **dpi_tag)
     logger.info(f"Saved cover {path}")
     return path

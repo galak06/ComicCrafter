@@ -227,10 +227,15 @@ Queue a job from Python with `generate_book_comic.delay("book.pdf", first_chapte
 - **Cover badge** (optional): `render_cover(..., badge=CoverBadge(path, width=0.14, position="bottom", rtl=None))`
   (`book_comic.cover_badge`, or the same fields as a dict; also `letter_cover(..., badge=...)`) draws a
   caller-supplied picture, normally a PNG with transparency, on the lettered cover. `width` is a share of the
-  cover width (kept within 0.06 to 0.2; a tall picture is scaled down to 14% of the height). It goes in the
-  first of four corners that stays 2% of the height away from every lettered line: the `position` band's
-  reading-end corner (bottom-left in Hebrew, bottom-right in English), that band's other corner, then the
-  other band's two corners in the same order. The corners are inside the lettering's print-safe box (11% in
+  cover width (kept within 0.06 to 0.2; a tall picture is scaled down to 14% of the height). It goes in one
+  of four corners that stay 2% of the height away from every lettered line, tried in this order: the
+  `position` band's reading-end corner (bottom-left in Hebrew, bottom-right in English), that band's other
+  corner, then the other band's two corners in the same order. Among the free corners it keeps off the
+  figure, without a vision call: when the head was measured (`render_cover`, or `letter_cover(...,
+  head_top=...)`) and a free top corner ends above it, only such corners are used, because the bottom band
+  of a hero cover holds the legs and feet; and a later corner replaces an earlier one when the unlettered
+  art under it is calmer by a quarter or more (`cover_badge.busyness`: the spread of colours after a blur
+  of an eighth of the badge width, so line work does not count and a boot or a limb does). The corners are inside the lettering's print-safe box (11% in
   from each side, ending at `SAFE_BOTTOM`, a top badge starting 8.5% down). Reading direction comes from
   `cast["language"]`, else the cover's text, unless `rtl` is set. The badge never moves or resizes
   lettering, is not drawn on `art_path`, and never fails a cover: with no free corner, or a missing or

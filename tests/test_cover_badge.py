@@ -1,4 +1,4 @@
-"""The optional front-cover badge: print-safe corners, clear of the lettering, never a reason to lose a cover."""
+"""The optional front-cover badge: print-safe corners, clear of the lettering and of the figure, never a reason to lose a cover."""
 
 import numpy as np
 import pytest
@@ -6,7 +6,7 @@ from PIL import Image
 
 from book_comic import cover as cover_module
 from book_comic.cover import HEAD_SAFE_MIN, render_cover
-from book_comic.cover_badge import MAX_HEIGHT, TOP_SAFE, WIDTH_RANGE, CoverBadge, badge_boxes, place_badge
+from book_comic.cover_badge import CALMER, MAX_HEIGHT, TOP_SAFE, WIDTH_RANGE, CoverBadge, badge_boxes, busyness, place_badge
 from book_comic.cover_lettering import SAFE_BOTTOM, SAFE_TOP, SAFE_WIDTH, letter_cover
 from conftest import FakeImages, FakeVision
 from test_cover_print_safe import CAST, CLEAN, HEBREW, LONG, MARGIN_MM, PRINTERS, SHORT, H, W, inside_trim_mm, lettered_lines
@@ -173,12 +173,85 @@ def test_a_white_badge_keeps_every_white_mark_inside_the_margins(mark):
             assert mm["bottom"] >= MARGIN_MM and mm["side"] >= MARGIN_MM
 
 
-def cover_run(tmp_path, monkeypatch, cast=CAST, **kwargs):
+BOOT, LEDGE = (120, 60, 20), (90, 120, 160)  # a large shape of the figure, and the flat setting behind it
+CORNERS = {name: i for i, name in enumerate(["bottom-end", "bottom-start", "top-end", "top-start"])}  # the order tried, LTR
+
+
+def scene(*shapes, size=SMALL, colour=BOOT):
+    """Flat art with a large shape (a boot, a limb) covering half of each named corner box of a 14% badge."""
+    picture, side = art(size), round(size[0] * 0.14)
+    boxes = badge_boxes((side, side), size, "bottom", False, SAFE_BOTTOM, SAFE_WIDTH)
+    for name in shapes:
+        left, top, right, bottom = boxes[CORNERS[name]]
+        picture.paste(colour, (left + side // 2, top - side // 4, right + side // 4, bottom + side // 4))
+    return picture
+
+
+def placed(picture, cover=ONLY_TITLE, **kwargs):
+    return corner(badge_box(letter_cover(picture, cover, badge=CoverBadge(kwargs.pop("mark")), **kwargs)), picture.size)
+
+
+def test_a_corner_on_a_large_shape_passes_the_badge_to_a_calm_one(mark):
+    """Real cover 2026-11-13 (Hebrew): the badge sat on the hero's boot; the placement knew only the lettering."""
+    assert placed(scene(), mark=mark()) == ("bottom", "right")  # flat art: the order as before
+    assert placed(scene("bottom-end"), mark=mark()) == ("bottom", "left")
+    assert placed(scene("bottom-end", "bottom-start"), mark=mark()) == ("top", "right")
+    assert placed(scene("bottom-end", "bottom-start", "top-end"), mark=mark()) == ("top", "left")
+    assert placed(scene("bottom-start", "top-end", "top-start"), mark=mark()) == ("bottom", "right")  # the first corner is the calm one
+    # Every corner on a shape: still a badge, in the least busy corner, here a tie that the order decides.
+    assert placed(scene(*CORNERS), mark=mark()) == ("bottom", "right")
+
+
+def test_fine_texture_does_not_move_the_badge_and_a_slightly_calmer_corner_does_not_win(mark):
+    """Windows, hatching and rock cracks are fine under a badge: only shapes about its own size count."""
+    textured, side = art(), round(SMALL[0] * 0.14)
+    first, second, *top = badge_boxes((side, side), SMALL, "bottom", False, SAFE_BOTTOM, SAFE_WIDTH)
+    for x in range(first[0] - side, first[2] + side, 6):  # a grid of thin dark lines, as a far building's windows
+        textured.paste((20, 30, 60), (x, first[1] - side, x + 2, first[3] + side))
+    assert busyness(textured, first) < 3 and placed(textured, mark=mark()) == ("bottom", "right")
+    assert busyness(scene("bottom-end"), first) > 20 > 1 > busyness(scene("bottom-end"), second)
+    soft = scene("bottom-end", colour=(110, 135, 170))  # a shape barely different from the setting on the first corner,
+    soft.paste((108, 134, 170), (second[0], second[1], second[0] + side // 2, second[3]))  # a smaller one on the second
+    assert 0 < CALMER * busyness(soft, first) < busyness(soft, second) < busyness(soft, first)
+    place = lambda picture: place_badge(picture.convert("RGBA"), CoverBadge(mark()), top, False, SAFE_BOTTOM, SAFE_WIDTH, art=picture)
+    assert place(soft) == first  # not calmer by enough to leave the preferred corner
+    assert place(scene("bottom-end")) == second and placed(soft, mark=mark()) == ("top", "right")  # flat sky is
+
+
+def test_a_head_measured_below_the_top_corners_sends_the_badge_above_the_figure(mark):
+    """The bottom band holds a full-body hero's legs and feet whatever the pixels say (a dark boot on dark rock)."""
+    assert placed(scene(), mark=mark(), head_top=0.3) == ("top", "right")
+    wide = mark((543, 376))  # the real badge's shape: its top corners end 14.9% down, above the real head at 17.6%
+    assert placed(scene(), HEBREW | {"title": "מרדף בהרים"}, mark=wide, head_top=0.176) == ("top", "left")  # reading end
+    assert placed(scene(), HEBREW | {"title": "מרדף בהרים"}, mark=wide, head_top=0.14) == ("bottom", "left")  # the head reaches them
+    assert placed(scene("top-end"), mark=mark(), head_top=0.3) == ("top", "left")  # a raised prop in one top corner
+    assert placed(scene("top-end", "top-start"), mark=mark(), head_top=0.3) == ("top", "right")  # still above the figure
+    # A head that reaches the top corners' rows says nothing about them: the calmest corner, in the usual order.
+    assert placed(scene(), mark=mark(), head_top=0.12) == ("bottom", "right")
+    assert placed(scene("bottom-end"), mark=mark(), head_top=0.12) == ("bottom", "left")
+    # A title that reaches both top corners leaves the bottom band, where the calm corner wins.
+    assert placed(scene(), MID, mark=mark(), head_top=0.3) == ("bottom", "right")
+    assert placed(scene("bottom-end"), MID, mark=mark(), head_top=0.3) == ("bottom", "left")
+
+
+def test_the_corner_is_judged_on_the_unlettered_art_and_the_lettering_still_comes_first(mark):
+    busy = scene("bottom-end")
+    page = busy.convert("RGBA")
+    first, second, third, fourth = badge_boxes((96, 96), SMALL, "bottom", False, SAFE_BOTTOM, SAFE_WIDTH)
+    badge = CoverBadge(mark())
+    assert place_badge(page.copy(), badge, [], False, SAFE_BOTTOM, SAFE_WIDTH) == first  # no art given: the first free corner
+    assert place_badge(page.copy(), badge, [], False, SAFE_BOTTOM, SAFE_WIDTH, art=busy) == second
+    assert place_badge(page.copy(), badge, [second, third, fourth], False, SAFE_BOTTOM, SAFE_WIDTH, art=busy) == first  # busy but the only free one
+    assert place_badge(page.copy(), badge, [third], False, SAFE_BOTTOM, SAFE_WIDTH, art=art(), head_top=0.3) == fourth
+    assert place_badge(page.copy(), badge, [first, second, third, fourth], False, SAFE_BOTTOM, SAFE_WIDTH, art=busy, head_top=0.3) is None
+
+
+def cover_run(tmp_path, monkeypatch, cast=CAST, cover=MID, **kwargs):
     seen = []
     real = cover_module.letter_cover
     monkeypatch.setattr(cover_module, "letter_cover", lambda *a, **k: seen.append(k) or real(*a, **k))
     images = FakeImages([Image.new("RGB", (400, 600), (90, 120, 160))])
-    path = render_cover(cast, {"scene": "Dana on the cliff", **MID}, (400, 600), tmp_path / "cover.png", images,
+    path = render_cover(cast, {"scene": "Dana on the cliff", **cover}, (400, 600), tmp_path / "cover.png", images,
                         FakeVision(lambda p, i: {**CLEAN, "head_top": 300}), art_path=tmp_path / "art.png", **kwargs)
     return Image.open(path).convert("RGB"), seen[0], images.calls
 
@@ -187,11 +260,14 @@ def test_render_cover_without_a_badge_calls_the_lettering_as_before(tmp_path, mo
     plain, keywords, calls = cover_run(tmp_path, monkeypatch)
     assert keywords == {"title_at_bottom": False}  # no badge keyword at all
     badged, keywords, badged_calls = cover_run(tmp_path, monkeypatch, badge=CoverBadge(mark()))
-    assert keywords["badge"].rtl is None and corner(badge_box(badged), (400, 600)) == ("bottom", "right")
+    assert keywords["badge"].rtl is None and keywords["head_top"] == 0.3  # the measured head goes with the badge
+    assert corner(badge_box(badged), (400, 600)) == ("bottom", "right")  # this title reaches both top corners
     assert badged_calls == calls  # the same draw: the badge never reaches the image model
     assert badge_box(Image.open(tmp_path / "art.png").convert("RGB")) is None  # the unlettered art stays clean
     missing, _, _ = cover_run(tmp_path, monkeypatch, badge=CoverBadge(tmp_path / "missing.png"))
     assert missing.tobytes() == plain.tobytes()
+    above, _, _ = cover_run(tmp_path, monkeypatch, cover=ONLY_TITLE, badge=CoverBadge(mark()))
+    assert corner(badge_box(above), (400, 600)) == ("top", "right")  # a short title: the corner above the measured head
 
 
 def test_render_cover_takes_the_corner_from_the_comics_language(tmp_path, monkeypatch, mark):
@@ -201,3 +277,5 @@ def test_render_cover_takes_the_corner_from_the_comics_language(tmp_path, monkey
     assert corner(badge_box(english), (400, 600)) == ("bottom", "right")
     forced, _, _ = cover_run(tmp_path, monkeypatch, cast={**CAST, "language": "he"}, badge=CoverBadge(mark(), rtl=False))
     assert corner(badge_box(forced), (400, 600)) == ("bottom", "right")
+    short, _, _ = cover_run(tmp_path, monkeypatch, cast={**CAST, "language": "he"}, cover=ONLY_TITLE, badge=CoverBadge(mark()))
+    assert corner(badge_box(short), (400, 600)) == ("top", "left")  # above the head, on the side where Hebrew reading ends
