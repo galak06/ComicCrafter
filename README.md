@@ -195,6 +195,15 @@ Queue a job from Python with `generate_book_comic.delay("book.pdf", first_chapte
   the caption: a bubble goes where its tail misses it. A caption in the corner read second keeps the band
   above its bottom free of bubbles, so the caption is read first. An optional
   `note` is drawn in the last-read bottom corner.
+- **Sound effects**: a panel's optional `sfx` (one short line, Hebrew or English) is lettered by the engine
+  after the art check and after the caption, bubbles and note: Rubik Black, white with a black outline,
+  1.6 times the dialogue size, tilted 7° as one piece. It is never named in an image prompt, and a sound
+  effect the model paints itself is still a text defect. Its spot rides the bubble planner's one vision call
+  (an optional `"sfx": [x, y]` beside the source of the noise); without a point it goes to the upper corner
+  read last. It keeps off faces, protected subjects and all other lettering, shrinks down to the dialogue
+  size to stay within 45% of the panel's width and 30% of its height, and is left out (never an error, never
+  a redraw) when it does not fit; `PageRenderer.audit` gets a `{"kind": "sfx", "placed": ..., "reason": ...}`
+  entry either way. A panel with only an `sfx` makes that one planning call; splashes take one too.
 - **Image quality**: the writer starts every scene with a shot label. Panel 1 must be an establishing
   shot and every page needs at least two different shots; a page that breaks this rule is written once
   more. Image prompts include the comic craft rules, a strong no-text rule and the book's recurring
@@ -250,6 +259,7 @@ Script fields (all optional; older `cast.json` / `script_NN.json` files still wo
 | `cover{scene, title, starring, footer, title_font}` | `cast.json` | Cover art direction and lettering; `title_font` is a bundled font file name or a font path |
 | `dialogue[].bubble` | `script_NN.json` | Bubble kind (default `speech`) |
 | `note` | `script_NN.json` panel | Dedication caption in the bottom corner |
+| `sfx` | `script_NN.json` panel | Sound effect lettered by the engine over the finished art (`"BOOM!"`, `"בום!"`); never sent to the image model |
 
 Run the tests with `pytest -q` (no network calls; fake clients).
 

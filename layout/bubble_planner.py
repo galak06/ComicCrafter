@@ -28,10 +28,12 @@ class BubblePlan:
     caption_corner: Optional[str] = None
     protected: List[Tuple[float, float, float, float]] = field(default_factory=list)
     protected_checked: bool = False
+    sfx: Optional[Point] = None  # centre for the panel's sound effect, when asked for and answered
 
 
 def _prompt(
-    lines: List[Tuple[str, str]], has_caption: bool, rtl: bool = False, reserved_corners: Sequence[str] = ()
+    lines: List[Tuple[str, str]], has_caption: bool, rtl: bool = False, reserved_corners: Sequence[str] = (),
+    sfx: str = "",
 ) -> str:
     keep_clear = (
         f"\nCaption boxes may cover the {' and '.join(reserved_corners)} corners; keep bubbles out of them."
@@ -39,6 +41,19 @@ def _prompt(
     )
     order = "further right (this comic reads right-to-left)" if rtl else "further left"
     numbered = "\n".join(f'{i + 1}. {speaker or "unknown"}: "{text}"' for i, (speaker, text) in enumerate(lines))
+    return _base_prompt(numbered, order, has_caption, rtl, keep_clear) + (SFX_REQUEST.format(text=sfx[:40]) if sfx else "")
+
+
+# Added only for a panel with a sound effect, so every other panel's prompt stays as it was.
+SFX_REQUEST = (
+    '\nA sound effect "{text}" will also be lettered on the panel, outside the bubbles. Optionally add '
+    '"sfx": [x, y] to the JSON (same 0-1000 coordinates): the centre of an EMPTY spot right beside the source of '
+    'that noise (the impact, object or movement that makes it), never on a face, a hand or the main action. '
+    'Leave "sfx" out when there is no such empty spot.'
+)
+
+
+def _base_prompt(numbered: str, order: str, has_caption: bool, rtl: bool, keep_clear: str) -> str:
     return f"""This is a comic book panel. Speech bubbles will be drawn on it for these lines:
 {numbered}
 
@@ -63,6 +78,16 @@ def _point(value) -> Optional[Point]:
     return (x, y)
 
 
+def _sfx_point(value) -> Optional[Point]:
+    """The optional sound-effect point; anything unusable is None and never spoils the plan."""
+    try:
+        if any(isinstance(v, bool) or not 0 <= v <= 1000 for v in value):
+            return None
+        return _point(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def plan_bubbles(
     image: Image.Image,
     lines: List[Tuple[str, str]],
@@ -71,6 +96,7 @@ def plan_bubbles(
     vision: Optional[VisionClient] = None,
     reserved_corners: Sequence[str] = (),
     precise: bool = False,
+    sfx: str = "",
 ) -> Optional[BubblePlan]:
     """Ask a vision model where each speaker is and where their bubble fits.
 
@@ -81,13 +107,14 @@ def plan_bubbles(
         rtl: Whether the comic reads right-to-left
         vision: Vision client (its cost is recorded there); a default VisionClient if None
         reserved_corners: Corners taken by other boxes (e.g. a dedication note), kept bubble-free
+        sfx: The panel's sound effect ("" for none): the same request then also asks for a point for it
 
     Returns:
         BubblePlan, or None if the request or response failed
     """
     vision = vision or VisionClient()
     try:
-        prompt = _prompt(lines, has_caption, rtl, reserved_corners)
+        prompt = _prompt(lines, has_caption, rtl, reserved_corners, sfx)
         if precise:
             prompt += ('\nA first layout could not fit. Recheck tight rectangles around actual faces and focal '
                        'hands/props; do not mark whole bodies or empty background as protected. '
@@ -122,6 +149,7 @@ def plan_bubbles(
             protected=protected,
             protected_checked=isinstance(rectangles, list) and len(rectangles) == len(protected),
             caption_corner=corner if corner in ("top-left", "top-right") else None,
+            sfx=_sfx_point(data.get("sfx")) if sfx else None,
         )
     except Exception as e:
         logger.warning(f"Bubble planning with {vision.model} failed; using default placement: {e}")

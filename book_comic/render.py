@@ -13,6 +13,7 @@ from PIL.PngImagePlugin import PngInfo
 
 from book_comic.comic_rules import establishing_shot
 from book_comic.scene_requirements import scene_requirements
+from book_comic.sfx import letter_sfx, sfx_text
 from book_comic.art_check import ArtCheckError, draw_checked, request_art
 from book_comic.rejected_art import RejectedArtSaver
 from book_comic.framing import framing_block
@@ -186,17 +187,18 @@ class PageRenderer:
             return Image.new("RGB", size, (200, 200, 200))
 
     def _letter(self, image: Image.Image, panel: Dict, type_height: Optional[int] = None) -> Image.Image:
-        """Caption, bubbles and note; type_height sizes the type as for a panel that tall (default: the art's)."""
+        """Caption, bubbles, note and sound effect; type_height sizes the type as for a panel that tall (default: the art's)."""
         self.lettering_checks = set()
         dialogue = [d for d in panel.get("dialogue", []) if d.get("text")]
         caption = panel.get("caption", "")
         note = panel.get("note", "")
-        if not dialogue and not caption and not note:
-            return image
+        sfx = sfx_text(panel.get("sfx"))
+        if not dialogue and not caption and not note:  # a sound effect alone: one planning call, never a failure
+            return letter_sfx(self, image, image, sfx, self._rtl([sfx]), type_height) if sfx else image
 
         texts = [d["text"] for d in dialogue]
         kinds = [d.get("bubble") or "speech" for d in dialogue]
-        rtl = self._rtl(texts + [caption, note])
+        rtl = self._rtl(texts + [caption, note, sfx])
         # Telling the vision model what each speaker looks like keeps tails on the right character
         speakers = [
             f"{c['name_en']} ({c['look'][:160]})" for c in (self._character(d.get("speaker", "")) for d in dialogue)
@@ -205,7 +207,7 @@ class PageRenderer:
         font = self.options.font_path
         for precise in (False, True):
             plan = plan_bubbles(image, list(zip(speakers, texts)), bool(caption), rtl,
-                                vision=self.vision, reserved_corners=reserved, precise=precise)
+                                vision=self.vision, reserved_corners=reserved, precise=precise, **({"sfx": sfx} if sfx else {}))
             if plan is None or not plan.protected_checked:
                 self.lettering_checks.add('lettering_plan')
                 continue
@@ -222,7 +224,8 @@ class PageRenderer:
                     reserved_boxes.append(box)
                 lettered = render_dialogue(image, texts, caption, plan, kinds=kinds, rtl=rtl,
                                            font_path=font, reserved=reserved_boxes, type_height=type_height)
-                return draw_note(lettered, note, rtl=rtl, font_path=font, type_height=type_height)
+                lettered = draw_note(lettered, note, rtl=rtl, font_path=font, type_height=type_height)
+                return letter_sfx(self, image, lettered, sfx, rtl, type_height, plan) if sfx else lettered
             except ValueError as error:
                 if str(error) not in ("comic_lettering_no_space", "comic_lettering_overflow"):
                     raise
