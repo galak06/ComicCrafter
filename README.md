@@ -220,6 +220,16 @@ placeholder when an image fails. Set `fail_on_image_error=True` to raise instead
 `sheet_path`, `chain_panels` and `check_art` (`book_comic.pipeline.default_options`). Pass
 `options=RenderOptions()` for the plain renderer.
 
+`RenderOptions(style_ref=...)` (optional, default `None`) attaches a palette reference to every panel of a
+page, so the pages match a picture drawn earlier, normally the unlettered front cover
+(`render_cover(art_path=...)`). Pass an image file path, an open PIL image or a `data:` URL (each is sent as
+a JPEG of at most 1536 px) or an http(s) URL (sent as it is). It is the last reference of each panel draw,
+after the photo, the sheet and the previous panel, with the role `palette`: colours, line work, lighting and
+texture only, never its composition, figures, poses, setting or objects. The character sheet is drawn
+without it and the art check never receives it (the checker is told the brief's last reference is not
+attached), so likeness, design and scene are still judged against the photo, the sheet and the earlier
+panels only. A file that cannot be read draws the page without it. The pipeline does not set it.
+
 Script fields (all optional; older `cast.json` / `script_NN.json` files still work):
 
 | Field | Where | Meaning |

@@ -4,7 +4,6 @@ import base64
 import logging
 import math
 import json
-from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -18,6 +17,7 @@ from book_comic.art_check import ArtCheckError, draw_checked, request_art
 from book_comic.rejected_art import RejectedArtSaver
 from book_comic.framing import framing_block
 from book_comic.image_prompts import NO_TEXT, panel_prompt, sheet_prompt  # noqa: F401  (NO_TEXT re-exported)
+from book_comic.render_options import RenderOptions, palette_reference  # noqa: F401  (RenderOptions re-exported)
 from generation.openrouter_image_client import OpenRouterImageClient, closest_aspect_ratio
 from generation.vision_client import VisionClient
 from layout.bubble_planner import plan_bubbles
@@ -34,34 +34,6 @@ PRINT_PAGE_SIZE = (math.ceil(6.875 * PRINT_DPI), math.ceil(10.5 * PRINT_DPI))  #
 RTL_LANGUAGES = {"he", "ar", "fa", "ur", "yi"}
 # A page is one full-page splash panel or a three-panel vertical strip
 PAGE_LAYOUTS = {1: LayoutType.FULL_PAGE, 3: LayoutType.VERTICAL_STRIP}
-
-
-@dataclass
-class RenderOptions:
-    """How pages are drawn. The defaults reproduce the plain one-call-per-panel renderer.
-
-    Attributes:
-        font_path: Lettering font file for bubbles, captions and notes (default: bundled + system fonts)
-        fail_on_image_error: Raise when an image call fails instead of drawing a gray placeholder
-        check_art: Ask the vision model whether the art (and the character sheet) has painted-in writing or extra
-            hands or design/scene drift, with at most three draws; unchecked art raises, and so does a
-            sheet or panel whose three draws all have a hard defect (a panel otherwise keeps its least-bad draw)
-        chain_panels: Send the previous panel of the page as a reference, for continuity
-        photo: Reference photo of the main character (http or data: URL)
-        sheet_path: Where the main character's sheet is drawn once (and reused); it is then a reference
-            for every panel. None draws no sheet
-        dpi: DPI tag for saved page PNGs (e.g. PRINT_DPI); None leaves PIL's default
-        rejected_dir: When set, every draw the art check rejects (panel, cover, sheet) is saved there as
-            <stage>_p<panel>_d<draw>.png plus a .json of failed check names and reasons (at most 12 per renderer)
-    """
-    font_path: Optional[str] = None
-    fail_on_image_error: bool = False
-    check_art: bool = False
-    chain_panels: bool = False
-    photo: Optional[str] = None
-    sheet_path: Optional[Path] = None
-    dpi: Optional[int] = None
-    rejected_dir: Optional[Path] = None
 
 
 def image_url(image: Image.Image) -> str:
@@ -135,13 +107,14 @@ class PageRenderer:
         language = (self.cast.get("language") or "").lower()
         return language in RTL_LANGUAGES if language else any(is_rtl(t) for t in texts)
 
-    def _art(self, prompt: str, references: List[str], aspect_ratio: str, size=None, requirements=(), framing="") -> Image.Image:
+    def _art(self, prompt: str, references: List[str], aspect_ratio: str, size=None, requirements=(), framing="", palette=()) -> Image.Image:
+        """palette: the palette reference, drawn from (after the other references) but never checked against."""
         if self.options.check_art:
-            return draw_checked(self.images, self.vision, prompt, references, aspect_ratio, size=size, framing=framing,
+            return draw_checked(self.images, self.vision, prompt, references, aspect_ratio, size=size, framing=framing, draw_only=palette,
                                 requirements=requirements, props=self.cast.get("props", []), anchors=self.prop_anchors, audit=self.audit,
                                 on_reject=self.rejected.hook("panel", self.current_panel or 0), fallback=True,
                                 on_select=self.rejected.select_hook("panel", self.current_panel or 0))
-        return request_art(self.images, prompt, references, aspect_ratio)
+        return request_art(self.images, prompt, [*references, *palette], aspect_ratio)
 
     def character_sheet(self) -> Optional[str]:
         """Data URL of the main character's sheet, drawn on first use when options.sheet_path is set."""
@@ -192,13 +165,16 @@ class PageRenderer:
         if self.options.chain_panels and self._previous is not None:
             roles.append("previous")
             references.append(image_url(self._previous))
+        # Last, so the other references keep their numbers; kept apart because the check must not compare against it.
+        palette = [url for url in [palette_reference(self.options.style_ref)] if url]
+        roles += ["palette"] * len(palette)
         requirements = scene_requirements(panel["scene"], panel.get("requirements", []))
         self.current_stage = "panel"
         self._diagnostic_start = len(self.audit)
         try:
             framing = framing_block(self.cast, panel, requirements)
             art = self._art(self._image_prompt(panel, tuple(roles), splash, size), references, closest_aspect_ratio(*size), size=size,
-                            requirements=requirements, framing=framing)
+                            requirements=requirements, framing=framing, palette=palette)
             for prop in art.info.get("comic_verification", {}).get("prop_checks", []):
                 if prop["visible"]:
                     self.prop_anchors.setdefault(prop["name"], prop["observed"])

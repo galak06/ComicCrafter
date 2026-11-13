@@ -9,7 +9,7 @@ from typing import Dict, Optional, Sequence
 from PIL import Image, ImageOps
 
 from book_comic.best_draw import fallback_verification, pick_fallback, unasked_gloves
-from book_comic.check_tolerance import CONTACT_NOTE, HIDDEN_NOTE, HOLD_NOTE, MARKS_ROW_NOTE, PROP_MARKS_NOTE, SCENE_MARKING_NOTE, marks_only_row
+from book_comic.check_tolerance import CONTACT_NOTE, HIDDEN_NOTE, HOLD_NOTE, MARKS_ROW_NOTE, PALETTE_NOTE, PROP_MARKS_NOTE, SCENE_MARKING_NOTE, marks_only_row
 from book_comic.comic_rules import ANATOMY_RULE, NO_TEXT_RULE, PROPORTION_RULE, SEAM_CORRECTION, SINGLE_IMAGE_RULE, prop_shape
 from book_comic.lettering_space import CHECK_NOTE, useful_corrections
 from book_comic.margins import MARGIN_CORRECTION, target_aspect, trim_margins
@@ -46,10 +46,10 @@ class ArtCheckError(ValueError):
 
 
 def inspect_art(image: Image.Image, vision: VisionClient, references=(), context="", requirements=(), props=(), anchors=None,
-                setting: bool = False, keep_faint_text: bool = True) -> Dict[str, Optional[object]]:
+                setting: bool = False, keep_faint_text: bool = True, palette_omitted: bool = False) -> Dict[str, Optional[object]]:
     """Inspect the candidate and, in the same vision call, compare it to its references.
-
-    setting: the art must show a place with nobody in it (a back cover); adds figure_visible.
+    setting: the art must show a place with nobody in it (a back cover); adds figure_visible. palette_omitted: the
+    brief's last reference (a palette reference) is deliberately not among `references`; the checker is told so.
     """
     keys = ["has_text", "bad_anatomy"] + (["identity_mismatch", "design_mismatch", "scene_mismatch"] if context else [])
     if setting:
@@ -72,7 +72,7 @@ def inspect_art(image: Image.Image, vision: VisionClient, references=(), context
     if context:
         prompt += (
             " The FIRST attached image is the candidate; inspect only it for unwanted writing and anatomy. "
-            "The generation brief's reference image N is attached image N+1, after the candidate. "
+            "The generation brief's reference image N is attached image N+1, after the candidate. " + (PALETTE_NOTE if palette_omitted else "") +
             "Return additional booleans identity_mismatch (different face, age, hair, facial hair or head/body proportions), "
             "design_mismatch (wrong style, a different garment or hairstyle, a missing or added major garment, gloves, changed prop geometry or recurring companion design; never sleeve length, fit, folds, trim or shade), and "
             "scene_mismatch (wrong planned shot, expression, focal action, movement direction, essential object state, or another person near the hero or in focus; a distant, faceless background figure or silhouette alone is not a mismatch). "
@@ -214,7 +214,7 @@ def draw_checked(
     aspect_ratio: str,
     size=None,
     requirements=(), props=(), anchors=None, audit=None, on_reject=None, framing="", fallback=False, on_select=None,
-    strict_text=False,
+    strict_text=False, draw_only: Sequence[str] = (),
 ) -> Image.Image:
     """Bounded redraws for explicit defects only. Unchecked or rejected art is never returned.
 
@@ -225,6 +225,7 @@ def draw_checked(
     fallback: when every draw was rejected, return the least-bad one without a hard defect
     (book_comic.best_draw) instead of raising; its audit report carries "fallback": True and
     on_select(draw), when given, is told which 1-based draw was kept.
+    draw_only: references sent to the image model after `references` and never to the check (a palette reference).
     """
     redraw, negative, rejected, redraw_parts = "", None, [], []
     # A limb-only framing row is observed only, never enforced: it stays out of the check, the audit, the revision and
@@ -237,9 +238,9 @@ def draw_checked(
         if revised:
             previous_art, previous_found, _ = rejected[-1]
             extra = ["Repeat of the required framing: " + " ".join(framing.split()) if framing and (previous_found.get("scene_mismatch") or previous_found.get("requirement_mismatch")) else ""]
-            art = request_art(images, revision_prompt(prompt, previous_found, extra, checked, anchors), [*references, data_url(previous_art)], aspect_ratio, negative)
+            art = request_art(images, revision_prompt(prompt, previous_found, extra, checked, anchors), [*references, *draw_only, data_url(previous_art)], aspect_ratio, negative)
         else:
-            art = request_art(images, f"{prompt} {redraw}".rstrip() if redraw else prompt, references, aspect_ratio, negative)
+            art = request_art(images, f"{prompt} {redraw}".rstrip() if redraw else prompt, [*references, *draw_only], aspect_ratio, negative)
         # Paper margins (a print drawn on paper) are cut off before the check when the picture still fills the
         # panel; a picture too far from the panel's shape is redrawn, whole (cropping it would cut off the subject).
         # Only a sized panel: a character sheet is drawn on a plain background on purpose.
@@ -252,7 +253,7 @@ def draw_checked(
         if seam_cut:
             art = cut  # a strip stacked over or under the scene is cut off locally instead of spending a redraw
         found = inspect_art(art, vision, references=references, context=prompt, requirements=checked, props=props, anchors=anchors,
-                            keep_faint_text=not strict_text)
+                            keep_faint_text=not strict_text, palette_omitted=bool(draw_only))
         if margins == "redraw":
             found = {**found, "scene_mismatch": True, "margins_redraw": True, "corrections": [*(found.get("corrections") or []), MARGIN_CORRECTION]}
         if unasked_gloves(found, prompt):
