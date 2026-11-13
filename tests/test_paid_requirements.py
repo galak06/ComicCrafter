@@ -27,7 +27,7 @@ def test_extreme_long_shot_establishes_scale_before_full_character_description()
     assert 'about one-tenth of the image height' in prompt and 'never in the foreground' in prompt
 
 
-@pytest.mark.parametrize('scene,state', [('Hero opens the Case.', 'open'), ('Hero shuts the lid.', 'closed'),
+@pytest.mark.parametrize('scene,state', [('Hero opens the Case.', 'open'), ('The lid is shut.', 'closed'),
                                         ('The Case is vertical.', 'upright'), ('The Case rests horizontally.', 'flat')])
 def test_explicit_state_synonyms_remain_required(scene, state):
     required = [{'subject': 'Case', 'attribute': 'state', 'expected': state}]

@@ -24,7 +24,9 @@ an easier image. Only extract facts explicitly stated in that scene; do not infe
 false for the affected check instead of changing the scene. A resting case has no specified upright/flat state.
 Do not turn a plausible default into a requirement. An empty requirements list is correct when no explicit visible
 acceptance condition is stated. Bind each state to the noun it modifies: an instrument on an open toolbox
-does not make the instrument open. cover_requirements is empty when there is no cover.'''
+does not make the instrument open. An action in progress states no finished state: for "pushes the drawer shut",
+"closes the lid" or "is closing the door" extract no closed state (the picture shows the motion); extract closed only
+when the scene says the object is closed or shut. cover_requirements is empty when there is no cover.'''
 # The answer is model output: one malformed or failed answer is asked again before the page fails. A paid page had to
 # be retried by hand after a single comic_preflight_invalid (page 19); a second ask usually parses.
 PREFLIGHT_CALLS = 3
@@ -62,6 +64,31 @@ def _state_owner(scene, match, subjects):
     return None
 
 
+# A closing action in progress. Its picture shows the object still partly open, so a literal "closed" requirement
+# failed good draws: "Hero pushes the drawer shut" cost three draws of one panel ("state: expected closed, saw open").
+# An opening action needs no such rule: an object being opened is drawn open.
+_SETTLED = re.compile(r"\b(?:is|are|was|were|been|stays?|remains?|keeps?|kept|already|still|now|has|have|had)\s+(?:\w+ly\s+)?$", re.I)
+_MOTION = re.compile(r"\b(?:push|pull|slid|slam|swing|swung|nudg|kick|press|shov|bump|tug|forc|snap|bang|knock|elbow|yank|"
+                     r"flick|flip)\w*\b|\b(?:eases|easing)\b", re.I)
+_OBJECT_NEXT = re.compile(r"\s+(?:the|a|an|his|her|their|its|it|them|that|this)\b", re.I)
+_CLAUSE_END = re.compile(r"\s*(?:[,.;:!?]|$|(?:with|and|behind|while|as|then|using|by|before|until|but|so)\b)", re.I)
+
+
+def _closing_in_progress(scene, match):
+    """The word names the act of closing, not a closed object: "closes", "closing", "shuts", "to close", "to shut the
+    drawer", or a result of a motion verb in the same sentence ("pushes the drawer shut", "slams it closed"). "is
+    shut", "has closed", "the closed drawer" and "the shut drawer" state the finished state."""
+    word, after = match.group().lower(), scene[match.end():]
+    before = re.split(r"[.;!?]", scene[:match.start()])[-1]
+    if word not in ('shut', 'closed'):
+        return True  # close, closes, closing, shuts: verbs
+    if _SETTLED.search(before):
+        return False
+    if word == 'shut' and _OBJECT_NEXT.match(after):
+        return True  # "to shut the drawer": the verb, with its object after it
+    return bool(_MOTION.search(before) and _CLAUSE_END.match(after))
+
+
 def _explicit_requirements(scene, requirements, subjects=()):
     """Model extraction cannot invent literal pose/state constraints absent from approved text."""
     stated = {'standing': r'\b(?:stands?|standing)\b', 'seated': r'\b(?:sits?|sitting|seated)\b',
@@ -76,6 +103,8 @@ def _explicit_requirements(scene, requirements, subjects=()):
         pattern = stated.get(requirement['expected'].strip().lower())
         if requirement['attribute'] in ('pose', 'state') and pattern:
             matches = list(re.finditer(pattern, scene, re.I))
+            if requirement['expected'].strip().lower() == 'closed':
+                matches = [m for m in matches if not _closing_in_progress(scene, m)]
             if not matches:
                 continue
             subject = re.sub(r'^(?:the|a|an)\s+', '', requirement['subject'].strip().lower())

@@ -28,6 +28,12 @@ DIRECTION_NOTE = (
     "walks toward the camera right next to it: never set scene_mismatch, fail a direction requirement or write a "
     "correction for that. When you cannot tell, judge as the brief says."
 )
+# scene_mismatch: a closing action is drawn mid-motion ("Hero pushes the drawer shut": the drawer is still partly open).
+PROGRESS_NOTE = (
+    " An action in progress toward an end state (pushing a drawer shut, closing a door or a lid) is right at any stage "
+    "of the motion, the finished state included, while the hero is visibly doing it: never set scene_mismatch or write "
+    "a correction because the object is not fully closed yet. An object the scene says IS closed or open must be so."
+)
 BODY_VALUES = ("feet", "shins", "knees", "thighs", "waist", "chest", "face", "none")
 # Two more answers: how far down the hero is visible (a deterministic signal for the wide-shot crop), and squashed
 # proportions (its own flag, not bad_anatomy: see best_draw.HARD_DEFECTS).
