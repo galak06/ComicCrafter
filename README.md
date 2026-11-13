@@ -208,6 +208,17 @@ Queue a job from Python with `generate_book_comic.delay("book.pdf", first_chapte
   lettered with a shade, a one-line shadowed title, a starring line and a footer, all inside the
   printers' text margin on the printed cover (`cover_lettering.SAFE_TOP`, `SAFE_BOTTOM`, `SAFE_WIDTH`:
   12.7 mm inside the trim after Lulu's and BookPod's cover crops). It is placed first in the PDF.
+- **Cover badge** (optional): `render_cover(..., badge=CoverBadge(path, width=0.14, position="bottom", rtl=None))`
+  (`book_comic.cover_badge`, or the same fields as a dict; also `letter_cover(..., badge=...)`) draws a
+  caller-supplied picture, normally a PNG with transparency, on the lettered cover. `width` is a share of the
+  cover width (kept within 0.06 to 0.2; a tall picture is scaled down to 14% of the height). It goes in the
+  first of four corners that stays 2% of the height away from every lettered line: the `position` band's
+  reading-end corner (bottom-left in Hebrew, bottom-right in English), that band's other corner, then the
+  other band's two corners in the same order. The corners are inside the lettering's print-safe box (11% in
+  from each side, ending at `SAFE_BOTTOM`, a top badge starting 8.5% down). Reading direction comes from
+  `cast["language"]`, else the cover's text, unless `rtl` is set. The badge never moves or resizes
+  lettering, is not drawn on `art_path`, and never fails a cover: with no free corner, or a missing or
+  unreadable file, the cover is saved without it. Without `badge` the cover is pixel for pixel the same.
 - **Full-page splash**: `PageRenderer.render_page` takes 3 panels (a vertical strip) or 1 panel (a
   full-page splash, `LayoutType.FULL_PAGE`: one portrait image in the strip's outer frame, with the same
   references and art check, a splash prompt, and at most one caption and one bubble lettered at a strip

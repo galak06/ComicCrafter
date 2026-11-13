@@ -7,7 +7,8 @@ explicit art defects get at most one more image call, and failed inspection bloc
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Sequence
+from dataclasses import replace
+from typing import Dict, Optional, Sequence, Union
 
 from PIL import Image, ImageOps
 
@@ -16,11 +17,12 @@ from book_comic.comic_rules import cover_scene
 from book_comic.margins import trim_margins
 from book_comic.seam import find_seam
 from book_comic.art_check import ArtCheckError, inspect_art, request_art, require_checked
+from book_comic.cover_badge import CoverBadge, as_badge
 from book_comic.cover_lettering import CoverFonts, letter_cover
 from book_comic.image_prompts import cover_prompt, cover_requirements
 from book_comic.rejected_art import report as report_rejected
 from book_comic.revise import data_url, revision_prompt
-from book_comic.render import image_url
+from book_comic.render import RTL_LANGUAGES, image_url
 from generation.openrouter_image_client import OpenRouterImageClient, closest_aspect_ratio
 from generation.vision_client import VisionClient
 
@@ -72,6 +74,7 @@ def render_cover(
     fonts: Optional[CoverFonts] = None,
     dpi: Optional[int] = None,
     requirements=(), prop_anchors=None, audit=None, on_reject=None, art_path: Optional[Path] = None,
+    badge: Optional[Union[CoverBadge, Dict]] = None,
 ) -> Path:
     """Draw and letter the cover; at most ATTEMPTS image calls.
 
@@ -93,6 +96,10 @@ def render_cover(
         dpi: DPI tag for the saved PNG
         on_reject: Optional hook that sees each inspected, rejected draw (see art_check.draw_checked)
         art_path: Where to also save the chosen art unlettered (the back cover's style reference)
+        badge: Optional picture (a brand mark) drawn on the lettered cover only, never on art_path:
+            cover_badge.CoverBadge(path, width=0.14, position="bottom", rtl=None) or the same fields as a dict.
+            It goes in a print-safe corner clear of the lettering, or nowhere; it never changes a draw, the
+            lettering or the outcome. None (the default) saves exactly the cover drawn without this argument
     """
     # A cover keeps its own framing: the prompt strips the scene's shot and limb-only clauses (image_prompts.cover_prompt);
     # the check uses the same scene and the same requirements, without framing.
@@ -159,6 +166,10 @@ def render_cover(
     if art_path is not None:
         art.save(art_path, format="PNG")
     # Move the title instead of drawing again when the accepted head is in the title block.
-    letter_cover(art, cover, fonts, title_at_bottom=head < HEAD_TOP_MIN).save(path, format="PNG", optimize=True, **dpi_tag)
+    badge, language = as_badge(badge), (cast.get("language") or "").lower()
+    if badge and badge.rtl is None and language:  # the comic's language decides the corner, as it decides page lettering
+        badge = replace(badge, rtl=language in RTL_LANGUAGES)
+    extra = {"badge": badge} if badge else {}
+    letter_cover(art, cover, fonts, title_at_bottom=head < HEAD_TOP_MIN, **extra).save(path, format="PNG", optimize=True, **dpi_tag)
     logger.info(f"Saved cover {path}")
     return path
