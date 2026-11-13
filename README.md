@@ -211,8 +211,11 @@ Queue a job from Python with `generate_book_comic.delay("book.pdf", first_chapte
   previous panel and an optional photo as reference images. A vision check redraws art (up to three draws, the best kept) if the
   model painted text or an extra hand into it; the character sheet is checked the same way. Image and vision costs are counted in `cost_usd`.
 - **Cover**: `cover.png` is drawn from `cast.json`'s `cover`, using page one's panels as a reference
-  strip. A seam (a second strip stacked on top) is detected and cropped off. Art whose head sits too
-  high for the title gets its title block at the bottom instead; a head in the printers' top margin
+  strip. A seam (a second strip stacked on top) is detected and cropped off. The title and starring line
+  stay at the top whenever the head starts at least 2% of the height below that block, measured for the
+  cover's own title and faces (`cover_lettering.top_block_end`: about 13% to 16% of the height, so heads
+  from about 15% to 18% down keep a top title); only a head that would touch the block gets its title
+  block at the bottom instead. A head in the printers' top margin
   (above 8.5% of the height) is drawn again, and that rule never loses a cover: when no later draw is
   accepted (a revision that came back worse, a defect, a check that did not answer), the sound draw whose
   head is lowest is kept. A draw whose check finds no head at all (`head_missing`) is a rejected draw

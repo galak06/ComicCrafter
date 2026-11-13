@@ -18,7 +18,7 @@ from book_comic.margins import trim_margins
 from book_comic.seam import find_seam
 from book_comic.art_check import ArtCheckError, inspect_art, request_art, require_checked
 from book_comic.cover_badge import CoverBadge, as_badge
-from book_comic.cover_lettering import CoverFonts, letter_cover
+from book_comic.cover_lettering import CoverFonts, letter_cover, top_block_end
 from book_comic.image_prompts import cover_prompt, cover_requirements
 from book_comic.rejected_art import report as report_rejected
 from book_comic.revise import data_url, revision_prompt
@@ -28,9 +28,11 @@ from generation.vision_client import VisionClient
 
 logger = logging.getLogger(__name__)
 
-# The one-line title and the starring line end near 14% of the height; a head starting above 20%
-# would crowd them (measured on real covers: 0.16 crowds, 0.19-0.24 leaves clear space).
-HEAD_TOP_MIN = 0.2
+# The title stays at the top whenever the head starts at least this share of the height (one lettering gap) below
+# the top title block, measured for the cover's own title and faces (cover_lettering.top_block_end: 13.1% and 15.4%
+# of the height on the two real covers of 2026-11-13). A fixed limit of 20% had moved both titles onto the hero's
+# legs, with empty setting above heads at 17.6% and 19.1%.
+HEAD_GAP = 0.02
 # A head above 8.5% of the height prints in the printers' top margin (12.7 mm inside the trim): BookPod's B5 cuts
 # 7.8 mm of the 256.8 mm art above the trim (20.8 mm, 8.1%), Lulu's comic 3.2 mm of 266.7 mm (6.1%). Such a draw is
 # drawn again while draws remain; it is never a reason to lose the cover: when no later draw is accepted, whatever
@@ -52,6 +54,11 @@ def _skipped(audit, draw: int, reason: str) -> None:
 def _high_heads(rejected) -> list:
     """Indexes of the draws set aside only because the head would print in the top margin: checked, sound art."""
     return [i for i, (_, _, report) in enumerate(rejected) if report.get("head_in_margin")]
+
+
+def title_goes_bottom(head: float, size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None) -> bool:
+    """Whether the head (its top, as a share of the height) would touch the top title block of this cover."""
+    return head < top_block_end(size, cover, fonts) + HEAD_GAP
 
 
 def panel_strip(arts: Sequence[Image.Image], height: int = 512, gap: int = 16) -> Optional[Image.Image]:
@@ -85,7 +92,7 @@ def render_cover(
     """Draw and letter the cover; at most ATTEMPTS image calls.
 
     Remove a seam locally, then accept only inspected art with matching identity, designs and scene.
-    Unchecked or persistently rejected art raises. A high head moves lettering instead of causing a redraw;
+    Unchecked or persistently rejected art raises. A head that would touch the top title block moves the lettering to the bottom instead of causing a redraw;
     only a head in the printers' top margin (HEAD_SAFE_MIN) is drawn again, and never fails the cover: sound art
     with a high head is kept when no later draw is accepted. A draw without a measurable head is a rejected draw.
 
@@ -181,11 +188,11 @@ def render_cover(
     dpi_tag = {"dpi": (dpi, dpi)} if dpi else {}
     if art_path is not None:
         art.save(art_path, format="PNG")
-    # Move the title instead of drawing again when the accepted head is in the title block.
+    # Move the title instead of drawing again, and only when the accepted head would be in this title's block.
     badge, language = as_badge(badge), (cast.get("language") or "").lower()
     if badge and badge.rtl is None and language:  # the comic's language decides the corner, as it decides page lettering
         badge = replace(badge, rtl=language in RTL_LANGUAGES)
     extra = {"badge": badge} if badge else {}
-    letter_cover(art, cover, fonts, title_at_bottom=head < HEAD_TOP_MIN, **extra).save(path, format="PNG", optimize=True, **dpi_tag)
+    letter_cover(art, cover, fonts, title_at_bottom=title_goes_bottom(head, art.size, cover, fonts), **extra).save(path, format="PNG", optimize=True, **dpi_tag)
     logger.info(f"Saved cover {path}")
     return path

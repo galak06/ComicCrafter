@@ -79,17 +79,22 @@ def _cover_shade(size: tuple) -> Image.Image:
     return overlay
 
 
-def _shadowed_text(page: Image.Image, text: str, font, max_width: int, y: int, align_bottom=False, blur=6,
-                   boxes: Optional[List[tuple]] = None) -> int:
-    """Centred white text with a soft dark shadow; returns its height. boxes, when given, collects the text's box."""
-    draw = ImageDraw.Draw(page)
+def _block(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> tuple:
+    """(wrapped text, drawing style, its box at the origin) of a centred block, as _shadowed_text draws it."""
     wrapped = _wrap(draw, text, font, max_width)
     style = {"align": "center", "spacing": max(4, font.size // 6), "direction": "rtl" if is_rtl(text) else "ltr"}
     try:
-        left, top, right, bottom = draw.multiline_textbbox((0, 0), wrapped, font=font, **style)
+        box = draw.multiline_textbbox((0, 0), wrapped, font=font, **style)
     except (KeyError, ValueError):  # Pillow without libraqm cannot set direction; Hebrew is still shaped
         style.pop("direction")
-        left, top, right, bottom = draw.multiline_textbbox((0, 0), wrapped, font=font, **style)
+        box = draw.multiline_textbbox((0, 0), wrapped, font=font, **style)
+    return wrapped, style, box
+
+
+def _shadowed_text(page: Image.Image, text: str, font, max_width: int, y: int, align_bottom=False, blur=6,
+                   boxes: Optional[List[tuple]] = None) -> int:
+    """Centred white text with a soft dark shadow; returns its height. boxes, when given, collects the text's box."""
+    wrapped, style, (left, top, right, bottom) = _block(ImageDraw.Draw(page), text, font, max_width)
     tw, th = right - left, bottom - top
     x = (page.width - tw) // 2 - left
     y0 = (y - th if align_bottom else y) - top
@@ -102,6 +107,32 @@ def _shadowed_text(page: Image.Image, text: str, font, max_width: int, y: int, a
     return th
 
 
+def _faces(cover: Dict, fonts: CoverFonts, size: tuple) -> tuple:
+    """(title face, starring face) at their drawn sizes for a cover of `size`; None for a line the cover lacks."""
+    w, h = size
+    title, title_font = cover.get("title", ""), None
+    if title:
+        path = resolve_font(cover.get("title_font"), fonts.title)
+        title_font = one_line_font(path, title, int(w * cover_title_scale(title) * fonts.title_scale), int(w * SAFE_WIDTH))
+    starring_font = ImageFont.truetype(str(fonts.starring), max(18, int(h * 0.026))) if cover.get("starring") else None
+    return title_font, starring_font
+
+
+def top_block_end(size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None) -> float:
+    """Where the top title block ends, as a share of the cover height: the title at SAFE_TOP and the starring line
+    one gap below it, measured for this title, these faces and this cover size exactly as letter_cover draws them
+    (SAFE_TOP itself for a cover with neither line). render_cover keeps the title at the top when the head starts
+    below it."""
+    w, h = size
+    title_font, starring_font = _faces(cover, fonts or CoverFonts(), size)
+    draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    height = lambda text, font, width: (lambda box: box[3] - box[1])(_block(draw, text, font, width)[2])
+    end = int(h * SAFE_TOP) + (height(cover["title"], title_font, w) if title_font else 0)
+    if starring_font:
+        end += h // 50 + height(cover["starring"], starring_font, int(w * SAFE_WIDTH))
+    return end / h
+
+
 def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = None, title_at_bottom: bool = False,
                  badge: Optional[Union[CoverBadge, Dict]] = None) -> Image.Image:
     """Letter the cover art.
@@ -111,7 +142,8 @@ def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = 
         cover: {"title", optional "starring", "footer", "title_font" (bundled file name or font path)}
         fonts: Faces to use; cover["title_font"] overrides the title face
         title_at_bottom: Stack the title and starring line just above the footer instead of at the top,
-            for art whose head reaches up into the title block (the title must never cover the face)
+            for art whose head reaches up into the title block (the title must never cover the face;
+            top_block_end says where that block ends)
         badge: Optional picture drawn after the lettering in a corner that is clear of it (cover_badge.CoverBadge
             or the same fields as a dict). It never moves or resizes a line; with no clear corner or an unreadable
             file there is no badge. None (the default) letters the cover exactly as without this argument
@@ -130,12 +162,7 @@ def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = 
         fh = _shadowed_text(page, cover["footer"], font, text_width, bottom, align_bottom=True, blur=max(3, h // 400), boxes=boxes)
         bottom -= fh + gap
     title = cover.get("title", "")
-    title_font = None
-    if title:
-        path = resolve_font(cover.get("title_font"), fonts.title)
-        size = int(w * cover_title_scale(title) * fonts.title_scale)
-        title_font = one_line_font(path, title, size, text_width)
-    starring_font = ImageFont.truetype(str(fonts.starring), max(18, int(h * 0.026))) if cover.get("starring") else None
+    title_font, starring_font = _faces(cover, fonts, page.size)
     if title_at_bottom:  # starring right above the footer, the title above it, both in the bottom shade
         if starring_font:
             bottom -= _shadowed_text(page, cover["starring"], starring_font, text_width, bottom, align_bottom=True, blur=max(3, h // 400), boxes=boxes) + gap

@@ -10,8 +10,8 @@ from PIL import Image
 
 from book_comic import cover as cover_module
 from book_comic.back_cover_lettering import letter_back_cover
-from book_comic.cover import HEAD_SAFE_MIN, HEADROOM_FIX, render_cover
-from book_comic.cover_lettering import letter_cover
+from book_comic.cover import HEAD_GAP, HEAD_SAFE_MIN, HEADROOM_FIX, render_cover, title_goes_bottom
+from book_comic.cover_lettering import SAFE_TOP, letter_cover, top_block_end
 from book_comic.revise import REVISE_MARK
 from conftest import FakeImages, FakeVision
 
@@ -122,7 +122,48 @@ def test_a_head_in_the_top_margin_is_drawn_again_with_a_request_for_headroom(tmp
 
 def test_a_head_just_below_the_margin_is_kept_without_another_draw(tmp_path, monkeypatch):
     calls, bottoms = render(tmp_path, monkeypatch, [0.09])
-    assert len(calls) == 1 and bottoms == [True]  # under 20%: the title still moves to the bottom
+    assert len(calls) == 1 and bottoms == [True]  # the head would be under the top title block: the title moves to the bottom
+
+
+# Real covers, 2026-11-13: both titles were lettered over the hero's legs with empty setting above heads at 17.6% and 19.1%.
+TITLES = {"he": {"title": "מרדף בהרים", "starring": "בכיכוב דני"},  # two Hebrew words, no descenders
+          "en": {"title": "Awakening Guardian", "starring": "Starring Danny", "footer": "For Danny, never stop running"},
+          "short": SHORT, "long": LONG, "hebrew": HEBREW}
+
+
+@pytest.mark.parametrize("cover", TITLES)
+def test_the_top_block_is_measured_as_it_is_lettered(cover):
+    lines = lettered_lines(letter_cover(Image.new("RGB", (W, H), (90, 120, 160)), {**TITLES[cover], "footer": ""}))
+    end = top_block_end((W, H), TITLES[cover])
+    assert lines[0][0] >= int(H * SAFE_TOP) and abs(lines[-1][1] - end * H) <= 2  # the last line's lowest lettered row
+    assert 0.11 < end < 0.17  # the old fixed limit of 20% left 3% to 8% of the height unused under the block
+
+
+def test_the_real_titles_need_thirteen_and_fifteen_percent_of_the_height():
+    assert round(top_block_end((W, H), TITLES["he"]), 3) == 0.131 and round(top_block_end((W, H), TITLES["en"]), 3) == 0.154
+    assert top_block_end((W, H), {}) == int(H * SAFE_TOP) / H  # nothing to letter at the top: only the margin
+    assert top_block_end((W, H), {"title": "Go"}) < top_block_end((W, H), TITLES["he"])  # no starring line: a shorter block
+
+
+@pytest.mark.parametrize("head, bottom", [(0.10, True), (0.15, True), (0.18, False), (0.25, False)])
+@pytest.mark.parametrize("cover", TITLES)
+def test_the_title_stays_at_the_top_when_the_head_starts_below_its_block(tmp_path, monkeypatch, head, bottom, cover):
+    if (cover, head) == ("hebrew", 0.15):
+        bottom = False  # a 39-character title is set small: its block ends 11.7% down, so even this head clears it
+    assert title_goes_bottom(head, (W, H), TITLES[cover]) is bottom
+    bottoms = []
+    monkeypatch.setattr(cover_module, "letter_cover", lambda art, c, f, title_at_bottom: bottoms.append(title_at_bottom) or art)
+    render_cover(CAST, {"scene": "Dana on the cliff", **TITLES[cover]}, (W // 4, H // 4), tmp_path / "cover.png",
+                 FakeImages([Image.new("RGB", (W // 4, H // 4), "red")]), FakeVision(lambda p, i: {**CLEAN, "head_top": head * 1000}))
+    assert bottoms == [bottom]
+
+
+def test_the_title_moves_only_when_the_head_would_touch_its_block():
+    for cover in TITLES.values():
+        limit = top_block_end((W, H), cover) + HEAD_GAP  # one lettering gap between the starring line and the hair
+        assert title_goes_bottom(limit - 0.001, (W, H), cover) and not title_goes_bottom(limit, (W, H), cover)
+    assert round(top_block_end((W, H), TITLES["he"]) + HEAD_GAP, 3) == 0.151  # the Hebrew cover's head, 0.176, clears it
+    assert round(top_block_end((W, H), TITLES["en"]) + HEAD_GAP, 3) == 0.174  # the English cover's head, 0.191, clears it
 
 
 def test_a_head_in_the_margin_on_every_draw_never_loses_the_cover(tmp_path, monkeypatch):
