@@ -245,6 +245,15 @@ Queue a job from Python with `generate_book_comic.delay("book.pdf", first_chapte
   badge: none is better than one on the figure or the main prop. The badge never moves or resizes
   lettering, is not drawn on `art_path`, and never fails a cover: with no free corner, or a missing or
   unreadable file, the cover is saved without it. Without `badge` the cover is pixel for pixel the same.
+- **Back cover badge** (optional): `render_back_cover(..., badge=CoverBadge(path, width=0.14, position="bottom"))`
+  (or the same fields as a dict; also `letter_back_cover(..., badge=...)`) draws the same kind of picture on the
+  lettered back cover. The back cover has no figure and its text is centred, so the badge takes one fixed,
+  centred spot, the same in Hebrew and English, with no search: for `"bottom"` below the text panel, ending one
+  lettering gap (2% of the height) above the footer line, or at `SAFE_BOTTOM` without a footer; for `"top"` in
+  the middle of the rows between the top margin (8.5% down) and the panel (20% down), over the art's calm upper
+  half. It has a soft shadow, as the cover's lines do. When the text leaves too little room it is drawn smaller
+  (down to 75%, never narrower than 6% of the cover), and otherwise not at all; it never moves or resizes text
+  and never fails a back cover. Without `badge` the back cover is pixel for pixel the same.
 - **Full-page splash**: `PageRenderer.render_page` takes 3 panels (a vertical strip) or 1 panel (a
   full-page splash, `LayoutType.FULL_PAGE`: one portrait image in the strip's outer frame, with the same
   references and art check, a splash prompt, and at most one caption and one bubble lettered at a strip
