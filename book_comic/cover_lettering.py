@@ -210,7 +210,8 @@ def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = 
     if badge:
         # Reading direction as the lines themselves take it: from the first lettered text (CoverBadge.rtl overrides).
         rtl = is_rtl(next((cover[key] for key in ("title", "starring", "footer") if cover.get(key)), ""))
-        placed = place_badge(page, badge, boxes, rtl, safe.bottom, safe.width, art=image, head_top=head_top)
+        placed = place_badge(page, badge, boxes, rtl, safe.bottom, safe.width, art=image, head_top=head_top,
+                             safe_top=safe.top)
         if placed:
             boxes, kinds = boxes + [placed], kinds + ["logo"]
     if report is not None:

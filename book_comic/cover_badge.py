@@ -104,17 +104,17 @@ def _clear(box: Box, taken: Sequence[Box], gap: int) -> bool:
 
 
 def badge_boxes(size: Tuple[int, int], cover_size: Tuple[int, int], position: str, rtl: bool,
-                safe_bottom: float, safe_width: float) -> List[Box]:
+                safe_bottom: float, safe_width: float, safe_top: float = TOP_SAFE) -> List[Box]:
     """The four corner boxes for a badge of `size`, in the order they are tried.
 
     Every box is inside the lettering's print-safe box: the side inset is the lettering's ((1 - SAFE_WIDTH) / 2),
-    a bottom badge ends at SAFE_BOTTOM and a top badge starts at TOP_SAFE. Order: the preferred band's
+    a bottom badge ends at SAFE_BOTTOM and a top badge starts at TOP_SAFE, or lower at safe_top. Order: the preferred band's
     reading-end corner, its other corner, then the other band's reading-end corner and its other corner.
     """
     (bw, bh), (w, h) = size, cover_size
     inset = math.ceil(w * (1 - safe_width) / 2)
     xs = {"left": inset, "right": w - inset - bw}
-    ys = {"bottom": h - math.ceil(h * safe_bottom) - bh, "top": math.ceil(h * TOP_SAFE)}
+    ys = {"bottom": h - math.ceil(h * safe_bottom) - bh, "top": math.ceil(h * max(TOP_SAFE, safe_top))}
     end, start = ("left", "right") if rtl else ("right", "left")
     first = position if position in POSITIONS else "bottom"
     bands = (first, "top" if first == "bottom" else "bottom")
@@ -154,7 +154,8 @@ def _calmest(art: Image.Image, boxes: Sequence[Box]) -> Box:
 
 
 def place_badge(page: Image.Image, badge, lettering: Sequence[Box], rtl: bool, safe_bottom: float, safe_width: float,
-                art: Optional[Image.Image] = None, head_top: Optional[float] = None) -> Optional[Box]:
+                art: Optional[Image.Image] = None, head_top: Optional[float] = None,
+                safe_top: float = TOP_SAFE) -> Optional[Box]:
     """Draw the badge on the lettered RGBA page in a corner that touches no lettering; returns its box.
 
     lettering: the boxes of the lines already drawn (title, starring line, footer). A corner is free when the
@@ -173,12 +174,12 @@ def place_badge(page: Image.Image, badge, lettering: Sequence[Box], rtl: bool, s
     if picture is None:
         return None
     direction = badge.rtl if isinstance(badge.rtl, bool) else rtl
-    gap, top_y = page.height // 50, math.ceil(page.height * TOP_SAFE)
+    gap, top_y = page.height // 50, math.ceil(page.height * max(TOP_SAFE, safe_top))
     art = art if art is not None and art.size == page.size else None
     measured = isinstance(head_top, (int, float)) and math.isfinite(head_top)
 
     def free_corners(size):
-        return [box for box in badge_boxes(size, page.size, badge.position, direction, safe_bottom, safe_width)
+        return [box for box in badge_boxes(size, page.size, badge.position, direction, safe_bottom, safe_width, safe_top)
                 if box[0] >= 0 and box[1] >= 0 and _clear(box, lettering, gap)]
 
     free, full = [], picture

@@ -95,6 +95,12 @@ def test_the_corners_are_tried_in_a_fixed_order():
     assert [corner(b, (1000, 2000)) for b in rtl] == [("top", "left"), ("top", "right"), ("bottom", "left"), ("bottom", "right")]
 
 
+def test_a_stricter_safe_top_moves_a_top_badge_down_and_never_up():
+    lower = badge_boxes((100, 80), (1000, 2000), "top", False, SAFE_BOTTOM, SAFE_WIDTH, safe_top=0.12)
+    assert lower[0][1] == 240  # 12% down, below the badge's own 8.5%
+    looser = badge_boxes((100, 80), (1000, 2000), "top", False, SAFE_BOTTOM, SAFE_WIDTH, safe_top=0.05)
+    assert looser[0][1] == 170  # a looser box keeps the badge's 8.5%
+
 def test_a_taken_corner_passes_the_badge_to_the_next_free_one(mark):
     page = art((1000, 2000)).convert("RGBA")
     first, second, third, fourth = badge_boxes((140, 140), (1000, 2000), "bottom", False, SAFE_BOTTOM, SAFE_WIDTH)
