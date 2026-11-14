@@ -8,7 +8,7 @@ background (a local 2026-11-05 run lost a whole preview to pedestrians in a city
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Union
+from typing import Dict, Optional, Sequence
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
@@ -16,7 +16,6 @@ from book_comic.art_check import ArtCheckError, inspect_art, request_art, requir
 from book_comic.back_cover_lettering import letter_back_cover
 from book_comic.best_draw import pick_fallback
 from book_comic.seam import find_seam
-from book_comic.cover_badge import CoverBadge
 from book_comic.cover_lettering import CoverFonts
 from book_comic.image_prompts import back_cover_prompt
 from book_comic.margins import trim_margins
@@ -52,7 +51,7 @@ def render_back_cover(
     fonts: Optional[CoverFonts] = None,
     dpi: Optional[int] = None,
     audit=None, on_reject=None,
-    badge: Optional[Union[CoverBadge, Dict]] = None,
+    stamps: Sequence = (),
 ) -> Path:
     """Draw and letter the back cover; at most ATTEMPTS image calls, then the least-bad draw without a hard defect.
 
@@ -63,11 +62,11 @@ def render_back_cover(
         path: Where the lettered back cover PNG is saved
         style_art: The unlettered front cover art, sent as a style reference
         on_reject: Optional hook that sees each inspected, rejected draw
-        badge: Optional picture (a brand mark) drawn on the lettered back cover: cover_badge.CoverBadge(path,
-            width=0.14, position="bottom") or the same fields as a dict. Centred below the text panel, above the
-            footer line, clear of all text and inside the print-safe area, or not drawn
-            (back_cover_lettering.letter_back_cover); it never changes a draw, the lettering or the outcome.
-            None (the default) saves exactly the back cover drawn without this argument
+        stamps: Optional opaque pictures (a logo tile, a barcode panel) for the bottom corners of the lettered back
+            cover: cover_stamps.CornerStamp(path, corner="right", width=0.14) or the same fields as dicts. They
+            stand on the print-safe bottom margin under the text, the same corners in every language, and the
+            footer line is kept between them (back_cover_lettering.letter_back_cover); they never change a draw
+            or the outcome. Empty (the default) saves exactly the back cover drawn without this argument
     """
     references, roles = ([image_url(style_art)], ["style"]) if style_art is not None else ([], [])
     prompt = back_cover_prompt(cast, back, size, roles)
@@ -115,7 +114,7 @@ def render_back_cover(
             raise ArtCheckError("comic_back_cover_rejected")
 
     dpi_tag = {"dpi": (dpi, dpi)} if dpi else {}
-    lettered = letter_back_cover(art, back, fonts, badge=badge) if badge else letter_back_cover(art, back, fonts)
+    lettered = letter_back_cover(art, back, fonts, stamps=stamps) if stamps else letter_back_cover(art, back, fonts)
     lettered.save(path, format="PNG", optimize=True, **dpi_tag)
     logger.info(f"Saved back cover {path}")
     return path

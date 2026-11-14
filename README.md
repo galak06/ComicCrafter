@@ -245,15 +245,18 @@ Queue a job from Python with `generate_book_comic.delay("book.pdf", first_chapte
   badge: none is better than one on the figure or the main prop. The badge never moves or resizes
   lettering, is not drawn on `art_path`, and never fails a cover: with no free corner, or a missing or
   unreadable file, the cover is saved without it. Without `badge` the cover is pixel for pixel the same.
-- **Back cover badge** (optional): `render_back_cover(..., badge=CoverBadge(path, width=0.14, position="bottom"))`
-  (or the same fields as a dict; also `letter_back_cover(..., badge=...)`) draws the same kind of picture on the
-  lettered back cover. The back cover has no figure and its text is centred, so the badge takes one fixed,
-  centred spot, the same in Hebrew and English, with no search: for `"bottom"` below the text panel, ending one
-  lettering gap (2% of the height) above the footer line, or at `SAFE_BOTTOM` without a footer; for `"top"` in
-  the middle of the rows between the top margin (8.5% down) and the panel (20% down), over the art's calm upper
-  half. It has a soft shadow, as the cover's lines do. When the text leaves too little room it is drawn smaller
-  (down to 75%, never narrower than 6% of the cover), and otherwise not at all; it never moves or resizes text
-  and never fails a back cover. Without `badge` the back cover is pixel for pixel the same.
+- **Back cover stamps** (optional): `render_back_cover(..., stamps=[CornerStamp(path, corner="right", width=0.14), ...])`
+  (`book_comic.cover_stamps`, or the same fields as dicts; also `letter_back_cover(..., stamps=...)`) draws
+  caller-supplied opaque pictures, such as a logo tile and a barcode panel, in the bottom corners of the
+  lettered back cover. `corner` is `"left"` or `"right"` as printed, the same in every language; `width` is a
+  share of the cover width (kept within 0.06 to 0.25; a tall picture is scaled down to 25% of the height). Each
+  stamp stands on the lettering's bottom margin (`SAFE_BOTTOM`) with its outer edge on the lettering's side
+  inset (11% in), so it prints inside both printers' margins, and starts one lettering gap (2% of the height)
+  or more under the text panel. Nothing is searched: when the text leaves too little room, all stamps are
+  drawn smaller together (down to 75%), and failing that the ones that do not fit at full size are left out.
+  The footer line is centred on the same bottom margin, so with stamps it is wrapped to the width left between
+  them, one gap from each. Stamps never move or resize the panel and never fail a back cover; a missing or
+  unreadable file is skipped. Without `stamps` the back cover is pixel for pixel the same.
 - **Full-page splash**: `PageRenderer.render_page` takes 3 panels (a vertical strip) or 1 panel (a
   full-page splash, `LayoutType.FULL_PAGE`: one portrait image in the strip's outer frame, with the same
   references and art check, a splash prompt, and at most one caption and one bubble lettered at a strip

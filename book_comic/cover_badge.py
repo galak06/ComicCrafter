@@ -1,4 +1,4 @@
-"""An optional caller-supplied badge (a small brand mark) on the front or the back cover, placed where it prints and covers nothing.
+"""An optional caller-supplied badge (a small brand mark) on the front cover, placed where it prints and covers nothing.
 
 The engine only places the picture it is given. The badge never changes the lettering and never fails a cover:
 when no corner is free, or the file cannot be read, the cover is lettered without it.
@@ -9,9 +9,6 @@ large shape, such as a boot or a limb, loses to a calm one). Real covers 2026-11
 With a measured head the badge is drawn a little smaller when that is what fits it beside the title above the head,
 and a corner that is not above the head is used only over calm art: no badge is better than one on the figure or
 the main prop (real cover 2026-11-14: 43 px short of the top corner, it was drawn on the robot).
-
-The back cover has no figure and its lettering is centred, so its badge takes one fixed, centred spot instead of a
-corner (place_centred_badge, called by back_cover_lettering.letter_back_cover).
 """
 
 import logging
@@ -52,8 +49,7 @@ ROUGH_LIMIT = 112
 
 @dataclass
 class CoverBadge:
-    """A picture drawn on a lettered cover. On the front cover it goes in a corner, as described below; on the back
-    cover it is centred, below the text panel for "bottom" and above it for "top", and rtl is not used.
+    """A picture drawn on the lettered front cover.
 
     Attributes:
         path: An image file, normally a PNG with transparency (its alpha is kept)
@@ -206,32 +202,3 @@ def place_badge(page: Image.Image, badge, lettering: Sequence[Box], rtl: bool, s
     box = _calmest(art, free) if art is not None else free[0]
     page.alpha_composite(picture, (box[0], box[1]))
     return box
-
-
-def place_centred_badge(page: Image.Image, badge, top: int, bottom: int, at_end: bool = True, shadow: int = 0) -> Optional[Box]:
-    """Draw the badge centred across the RGBA page inside the rows top..bottom; returns its box, or None.
-
-    The back cover's placement: one fixed spot and no search. The badge ends at `bottom` (at_end) or sits in the
-    middle of the rows. When the rows are too short for it, it is drawn smaller (SHRINKS, never narrower than
-    WIDTH_RANGE allows); when it still does not fit, or the file cannot be read, nothing is drawn.
-    shadow: blur radius in px of a soft dark shadow under the badge (0 for none), as the cover's shadowed lines have,
-    so a white mark stays readable over light art.
-    """
-    badge = as_badge(badge)
-    full = _load(badge, page.size) if badge else None
-    if full is None:
-        return None
-    room = bottom - top
-    picture = next((_resized(full, shrink) for shrink in SHRINKS
-                    if round(full.height * shrink) <= room and (shrink == 1 or full.width * shrink >= WIDTH_RANGE[0] * page.width)), None)
-    if picture is None:
-        logger.info("Cover badge not drawn: no room clear of the lettering")
-        return None
-    x = (page.width - picture.width) // 2
-    y = bottom - picture.height if at_end else top + (room - picture.height) // 2
-    if shadow > 0:
-        dark = Image.new("RGBA", page.size, (0, 0, 0, 0))
-        dark.paste((0, 0, 0, 190), (x, y + shadow // 2), picture.getchannel("A"))
-        page.alpha_composite(dark.filter(ImageFilter.GaussianBlur(shadow)))
-    page.alpha_composite(picture, (x, y))
-    return (x, y, x + picture.width, y + picture.height)
