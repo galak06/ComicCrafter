@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 
 from PIL import Image, ImageDraw
 
-from layout.lettering import CAPTION_FILL, INK, Rect, _font, _wrap, is_rtl, overlap_area
+from layout.lettering import CAPTION_FILL, INK, Bounds, Rect, _font, _wrap, is_rtl, overlap_area
 
 CAPTION_WIDTH = 0.46  # wrap width as a share of the panel; narrower turns two sentences into a tall column
 CAPTION_SIZE = 0.045  # font size as a share of the panel height
@@ -20,9 +20,16 @@ def text_box(
     font_path: Optional[str] = None,
     dry: bool = False,
     width_share: float = CAPTION_WIDTH,
+    safe: Optional[Bounds] = None,
 ) -> Rect:
-    """Draw (or with dry=True only measure) one boxed text block in a corner; returns its rectangle."""
+    """Draw (or with dry=True only measure) one boxed text block in a corner; returns its rectangle.
+
+    safe: (left, top, right, bottom) in the image's px that every inked pixel must stay inside (the page's print-safe
+    box mapped into the panel, print_safe.PrintSafe.panel_bounds); the box keeps its corner, moved in to the box's
+    edge where that is further in than the usual inset. A block that does not fit raises comic_lettering_overflow.
+    None: the whole image."""
     w, h = size
+    sl, st, sr, sb = safe or (0, 0, w, h)
     font = _font(font_size, text, font_path)
     pad = max(6, font_size // 3)
     align = "right" if is_rtl(text) else "left"
@@ -30,9 +37,10 @@ def text_box(
     left, top, right, bottom = draw.multiline_textbbox((0, 0), wrapped, font=font, align=align)
     bw, bh = right - left + 2 * pad, bottom - top + 2 * pad
     margin = max(8, h // 40)
-    x0 = margin if corner.endswith("left") else w - bw - margin
-    y0 = margin if corner.startswith("top") else h - bh - margin
-    if x0 < 0 or y0 < 0 or x0 + bw > w or y0 + bh > h:
+    # The outline is drawn inside [x0, x0 + bw] inclusive: bw + 1 px of ink.
+    x0 = max(margin, sl) if corner.endswith("left") else min(w - bw - margin, sr - bw - 1)
+    y0 = max(margin, st) if corner.startswith("top") else min(h - bh - margin, sb - bh - 1)
+    if x0 < max(0, sl) or y0 < max(0, st) or x0 + bw + 1 > min(w, sr) or y0 + bh + 1 > min(h, sb):
         raise ValueError("comic_lettering_overflow")
     if not dry:
         draw.rectangle([x0, y0, x0 + bw, y0 + bh], fill=CAPTION_FILL, outline=INK, width=max(2, h // 300))
@@ -42,21 +50,21 @@ def text_box(
 
 def draw_caption(
     image: Image.Image, text: str, corner: str, placed: List[Rect], font_path: Optional[str] = None,
-    width_share: float = CAPTION_WIDTH, type_height: Optional[int] = None,
+    width_share: float = CAPTION_WIDTH, type_height: Optional[int] = None, safe: Optional[Bounds] = None,
 ) -> Rect:
     """Draw a rectangular narration caption in a corner; its box is added to placed.
 
-    type_height: panel height the type is sized for (default: the image's own height)."""
+    type_height: panel height the type is sized for (default: the image's own height). safe: see text_box."""
     h = type_height or image.size[1]
     box = text_box(ImageDraw.Draw(image), image.size, text, max(14, int(h * CAPTION_SIZE)), corner, font_path,
-                   width_share=width_share)
+                   width_share=width_share, safe=safe)
     placed.append(box)
     return box
 
 
 def caption_corner(
     image: Image.Image, text: str, heads: List[Rect], rtl: bool, font_path: Optional[str] = None,
-    width_share: float = CAPTION_WIDTH, type_height: Optional[int] = None,
+    width_share: float = CAPTION_WIDTH, type_height: Optional[int] = None, safe: Optional[Bounds] = None,
 ) -> Tuple[str, int]:
     """The top corner a caption takes, and the area of the protected subjects in heads it covers there.
 
@@ -67,7 +75,7 @@ def caption_corner(
     font_size = max(14, int((type_height or image.size[1]) * CAPTION_SIZE))
 
     def covered(corner: str) -> int:
-        box = text_box(draw, image.size, text, font_size, corner, font_path, dry=True, width_share=width_share)
+        box = text_box(draw, image.size, text, font_size, corner, font_path, dry=True, width_share=width_share, safe=safe)
         return sum(overlap_area(box, head) for head in heads)
 
     reading_first, other = ("top-right", "top-left") if rtl else ("top-left", "top-right")
@@ -84,6 +92,7 @@ def place_caption(
     font_path: Optional[str] = None,
     width_share: float = CAPTION_WIDTH,
     type_height: Optional[int] = None,
+    safe: Optional[Bounds] = None,
 ) -> Rect:
     """Draw the caption in a top corner of the image (caption_corner), always: it never floats lower.
 
@@ -91,12 +100,14 @@ def place_caption(
     band down to its bottom stays clear.
 
     type_height sizes the type as for a panel of that height (default: the image's own height).
+    safe: the print-safe box the caption stays inside (text_box); its corner is still the reading-first one unless
+    that covers a protected subject the other does not (caption_corner).
 
     Returns:
         The caption's rectangle (also added to placed)
     """
-    corner, _ = caption_corner(image, text, heads, rtl, font_path, width_share, type_height)
-    box = draw_caption(image, text, corner, placed, font_path, width_share=width_share, type_height=type_height)
+    corner, _ = caption_corner(image, text, heads, rtl, font_path, width_share, type_height, safe)
+    box = draw_caption(image, text, corner, placed, font_path, width_share=width_share, type_height=type_height, safe=safe)
     if corner != ("top-right" if rtl else "top-left"):
         placed.append((0, 0, image.size[0], box[1] + box[3]))
     return box
@@ -108,12 +119,17 @@ def note_corner(rtl: bool) -> str:
 
 
 def draw_note(image: Image.Image, text: str, rtl: Optional[bool] = None, font_path: Optional[str] = None,
-              type_height: Optional[int] = None) -> Image.Image:
-    """Return a copy of the panel with a dedication caption in its last-read bottom corner."""
+              type_height: Optional[int] = None, safe: Optional[Bounds] = None,
+              report: Optional[List] = None) -> Image.Image:
+    """Return a copy of the panel with a dedication caption in its last-read bottom corner.
+
+    safe: the print-safe box it stays inside (text_box). report, when given, gets ("note", its ink box)."""
     if not text:
         return image
     panel = image.copy()
     rtl = is_rtl(text) if rtl is None else rtl
     font_size = max(14, int((type_height or panel.size[1]) * NOTE_SIZE))
-    text_box(ImageDraw.Draw(panel), panel.size, text, font_size, note_corner(rtl), font_path)
+    x, y, bw, bh = text_box(ImageDraw.Draw(panel), panel.size, text, font_size, note_corner(rtl), font_path, safe=safe)
+    if report is not None:
+        report.append(("note", (x, y, bw + 1, bh + 1)))
     return panel

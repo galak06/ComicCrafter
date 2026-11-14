@@ -17,6 +17,7 @@ from book_comic.sfx import letter_sfx, sfx_text
 from book_comic.art_check import ArtCheckError, draw_checked, request_art
 from book_comic.rejected_art import RejectedArtSaver
 from book_comic.framing import framing_block
+from book_comic.print_safe import as_print_safe, check_page, lettering_box
 from book_comic.image_prompts import NO_TEXT, panel_prompt, sheet_prompt  # noqa: F401  (NO_TEXT re-exported)
 from book_comic.render_options import RenderOptions, palette_reference  # noqa: F401  (RenderOptions re-exported)
 from generation.openrouter_image_client import OpenRouterImageClient, closest_aspect_ratio
@@ -74,6 +75,9 @@ class PageRenderer:
         self.current_panel = None
         self._diagnostic_start = 0
         self.lettering_checks = set()
+        self.print_safe = as_print_safe(self.options.print_safe)  # a bad override fails here, before any image call
+        # Every lettered element of the last page drawn: {"kind", "page", "box_px": [x, y, w, h]} in page px.
+        self.lettering_boxes: List[Dict] = []
         # Only the characters' own (private) names are kept out of saved reasons. The role names ("Hero") and the
         # story's prop names are in almost every observation; blocking them left most rejections without a reason.
         names = [c["name"] for c in cast.get("characters", []) if isinstance(c.get("name"), str) and c.get("name") != c.get("name_en")]
@@ -186,15 +190,26 @@ class PageRenderer:
             logger.warning(f"Panel image failed, using a gray placeholder: {e}")
             return Image.new("RGB", size, (200, 200, 200))
 
-    def _letter(self, image: Image.Image, panel: Dict, type_height: Optional[int] = None) -> Image.Image:
-        """Caption, bubbles, note and sound effect; type_height sizes the type as for a panel that tall (default: the art's)."""
+    def _letter(self, image: Image.Image, panel: Dict, type_height: Optional[int] = None, safe=None,
+                report: Optional[List] = None) -> Image.Image:
+        """Caption, bubbles, note and sound effect; type_height sizes the type as for a panel that tall (default: the art's).
+
+        safe: (left, top, right, bottom) in the art's px every lettered pixel stays inside (render_page passes the
+        print-safe box mapped into the panel); None is the whole panel. report, when given, gets (kind, (x, y, w, h))
+        for every element drawn."""
         self.lettering_checks = set()
+        found: List = []
         dialogue = [d for d in panel.get("dialogue", []) if d.get("text")]
         caption = panel.get("caption", "")
         note = panel.get("note", "")
         sfx = sfx_text(panel.get("sfx"))
         if not dialogue and not caption and not note:  # a sound effect alone: one planning call, never a failure
-            return letter_sfx(self, image, image, sfx, self._rtl([sfx]), type_height) if sfx else image
+            if not sfx:
+                return image
+            lettered = letter_sfx(self, image, image, sfx, self._rtl([sfx]), type_height, None, safe, found)
+            if report is not None:
+                report.extend(found)
+            return lettered
 
         texts = [d["text"] for d in dialogue]
         kinds = [d.get("bubble") or "speech" for d in dialogue]
@@ -211,33 +226,43 @@ class PageRenderer:
             if plan is None or not plan.protected_checked:
                 self.lettering_checks.add('lettering_plan')
                 continue
+            found = []
             try:
                 reserved_boxes = []
                 if note:
                     note_size = max(14, int((type_height or image.height) * NOTE_SIZE))
-                    box = text_box(ImageDraw.Draw(image), image.size, note, note_size, note_corner(rtl), font, dry=True)
+                    box = text_box(ImageDraw.Draw(image), image.size, note, note_size, note_corner(rtl), font, dry=True, safe=safe)
                     subjects = [(int(x * image.width), int(y * image.height), int(w * image.width), int(h * image.height))
                                 for x, y, w, h in plan.protected]
                     subjects += [head_box(p, image.size) for p in plan.speakers if p]
                     if any(overlap_area(box, subject) for subject in subjects):
                         raise ValueError("comic_lettering_no_space")
                     reserved_boxes.append(box)
-                lettered = render_dialogue(image, texts, caption, plan, kinds=kinds, rtl=rtl,
-                                           font_path=font, reserved=reserved_boxes, type_height=type_height)
-                lettered = draw_note(lettered, note, rtl=rtl, font_path=font, type_height=type_height)
-                return letter_sfx(self, image, lettered, sfx, rtl, type_height, plan) if sfx else lettered
+                lettered = render_dialogue(image, texts, caption, plan, kinds=kinds, rtl=rtl, font_path=font,
+                                           reserved=reserved_boxes, type_height=type_height, safe=safe, report=found)
+                lettered = draw_note(lettered, note, rtl=rtl, font_path=font, type_height=type_height, safe=safe, report=found)
+                if sfx:
+                    lettered = letter_sfx(self, image, lettered, sfx, rtl, type_height, plan, safe, found)
+                if report is not None:
+                    report.extend(found)
+                return lettered
             except ValueError as error:
                 if str(error) not in ("comic_lettering_no_space", "comic_lettering_overflow"):
                     raise
                 self.lettering_checks.add('lettering_overflow' if str(error) == 'comic_lettering_overflow' else 'lettering_space')
         raise ValueError("comic_lettering_no_space")
 
-    def render_page(self, panels: List[Dict], path: Path) -> Path:
+    def render_page(self, panels: List[Dict], path: Path, page: Optional[int] = None) -> Path:
         """Draw, letter and compose one page. Unlettered art is kept as art_<page>_<n>.png beside it.
 
         Three panels make a vertical strip. One panel is a full-page splash: one portrait image filling the
         strip's outer frame, lettered with at most one caption and one bubble at a strip panel's type size.
+
+        Every lettered pixel stays inside the print-safe box (options.print_safe). Afterwards self.lettering_boxes
+        holds each lettered element as {"kind": caption|balloon|note|sfx, "page": page, "box_px": [x, y, w, h]}
+        in page px (README, Lettering boxes). A box found outside the safe box raises comic_lettering_overflow.
         """
+        self.lettering_boxes = []
         if len(panels) not in PAGE_LAYOUTS:
             raise ValueError(f"comic_page_panel_count: a page has 1 (full-page splash) or 3 panels, got {len(panels)}")
         splash = len(panels) == 1
@@ -257,7 +282,11 @@ class PageRenderer:
             art.save(path.parent / f"art_{path.stem}_{number}.png", format="PNG")
             self._previous = art
             self.current_stage = "lettering"
-            images.append(self._letter(art, panel, type_height))
+            cx, cy = slot.get_content_area()[:2]
+            safe = self.print_safe.panel_bounds((self.layouts.page_width, self.layouts.page_height), (cx, cy), size)
+            found: List = []
+            images.append(self._letter(art, panel, type_height, safe, found))
+            self.lettering_boxes += [lettering_box(kind, page, (x + cx, y + cy, w, h)) for kind, (x, y, w, h) in found]
 
         if self.options.sheet_path and Path(self.options.sheet_path).exists() and self.prop_anchors:
             with Image.open(self.options.sheet_path) as sheet:
@@ -265,9 +294,12 @@ class PageRenderer:
                 metadata.add_text("comic_prop_anchors", json.dumps(self.prop_anchors))
                 saved = sheet.convert("RGB")
             saved.save(self.options.sheet_path, format="PNG", pnginfo=metadata)
-        page = self.layouts.compose_page(panels=images, layout=layout)
+        bounds = self.print_safe.page_bounds((self.layouts.page_width, self.layouts.page_height))
+        if check_page(self.lettering_boxes, bounds) is not None:  # never printed unsafe: the page is drawn again
+            raise ValueError("comic_lettering_overflow")
+        composed = self.layouts.compose_page(panels=images, layout=layout)
         dpi = {"dpi": (self.options.dpi, self.options.dpi)} if self.options.dpi else {}
-        page.save(path, format="PNG", optimize=True, **dpi)
+        composed.save(path, format="PNG", optimize=True, **dpi)
         logger.info(f"Saved page {path}")
         return path
 

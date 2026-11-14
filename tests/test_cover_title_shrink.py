@@ -26,7 +26,7 @@ def art():
 
 
 def test_a_block_that_misses_the_head_by_a_little_keeps_the_top_with_a_smaller_title():
-    assert round(END, 3) == 0.169  # where the real block ended
+    assert round(END, 3) == 0.175  # where the real block ended (0.169), 0.6% lower since SAFE_TOP moved from 0.064 to 0.07
     shrink = top_title_shrink(NEAR, (W, H), COVER, TALL, HEAD_GAP)
     assert MIN_TITLE_SHRINK <= shrink < 1 and not title_goes_bottom(NEAR, (W, H), COVER, TALL)
     assert top_block_end((W, H), COVER, TALL, shrink) + HEAD_GAP <= NEAR  # the gap is there

@@ -6,7 +6,7 @@ from PIL import Image
 from book_comic import back_cover as back_module
 from book_comic.art_check import ArtCheckError
 from book_comic.back_cover import render_back_cover
-from book_comic.back_cover_lettering import PANEL_TOP, letter_back_cover
+from book_comic.back_cover_lettering import PANEL_TOP, PANEL_WIDTH, letter_back_cover
 from book_comic.best_draw import pick_fallback
 from book_comic.image_prompts import back_cover_prompt
 from conftest import FakeImages, FakeVision
@@ -101,7 +101,7 @@ def test_the_panel_darkens_the_upper_half_and_leaves_the_bottom(back):
     art = Image.new("RGB", (800, 1200), (200, 200, 200))
     out = letter_back_cover(art, back)
     assert out.size == art.size
-    inside = out.getpixel((60 + 20, int(1200 * PANEL_TOP) + 20))
+    inside = out.getpixel((int(800 * (1 - PANEL_WIDTH) / 2) + 20, int(1200 * PANEL_TOP) + 20))
     assert sum(inside) < sum((200, 200, 200)) - 150  # the translucent dark panel
     assert out.getpixel((400, 1150)) == (200, 200, 200)  # below the panel the art is untouched
     assert out.getpixel((10, 10)) == (200, 200, 200)
@@ -110,3 +110,20 @@ def test_the_panel_darkens_the_upper_half_and_leaves_the_bottom(back):
 def test_no_text_leaves_the_art_as_it_is():
     art = Image.new("RGB", (400, 600), (90, 90, 90))
     assert letter_back_cover(art, {"tagline": "", "blurb": ""}).getpixel((200, 300)) == (90, 90, 90)
+
+
+def test_the_panel_is_as_wide_as_the_print_safe_box_and_is_reported():
+    """At 80% of the width the panel's edge printed 0.495 in inside Lulu's trim (BOOKS-48): it now spans the cover's
+    print-safe width (78%), centred, and is reported with the footer for the print check."""
+    from book_comic.print_safe import DEFAULT_COVER_SAFE, CoverSafe
+    art = Image.new("RGB", (2063, 3150), (200, 200, 200))
+    report = []
+    out = letter_back_cover(art, {**BACK, "footer": "For Dana"}, report=report)
+    side = DEFAULT_COVER_SAFE.side_px(2063)
+    blurb = next(b for b in report if b["kind"] == "blurb")["box_px"]
+    assert blurb[0] == side and blurb[0] + blurb[2] == 2063 - side + 1 and blurb[1] == int(3150 * PANEL_TOP)
+    assert out.getpixel((side - 1, blurb[1] + 40)) == (200, 200, 200) and out.getpixel((side + 1, blurb[1] + 40)) != (200, 200, 200)
+    assert [b["kind"] for b in report] == ["blurb", "footer"] and all(b["page"] == "back" for b in report)
+    narrow = []
+    letter_back_cover(art, BACK, safe=CoverSafe(width=0.7), report=narrow)  # the app's box, when it passes a stricter one
+    assert narrow[0]["box_px"][0] == CoverSafe(width=0.7).side_px(2063)

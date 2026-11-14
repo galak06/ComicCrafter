@@ -279,6 +279,67 @@ without it and the art check never receives it (the checker is told the brief's 
 attached), so likeness, design and scene are still judged against the photo, the sheet and the earlier
 panels only. A file that cannot be read draws the page without it. The pipeline does not set it.
 
+### Print-safe lettering and lettering boxes
+
+The engine letters a comic before the printer is known, so every caption, balloon, note, sound effect and cover
+line is kept inside one box that is safe for every comic printer at once (`book_comic/print_safe.py`, where the
+numbers are derived):
+
+- **Interior pages:** `RenderOptions(print_safe=...)`, default `print_safe.DEFAULT_PRINT_SAFE`: 168 px from the
+  left and right and 148 px from the top and bottom of the 2063 × 3150 page. That is Lulu's 0.5 in text margin
+  plus 1 mm, once Lulu fits the page into its 6.625 × 10.25 in trim (311.4 px/in, 0.067 in short top and
+  bottom); BookPod shrinks the page into its 5 mm safe box and alone needs only 0, 0, 14, 14 px. The panel art
+  still runs to the 100 px layout margin; only the lettering moves in. Captions keep their corner (top-right in
+  a right-to-left comic, top-left otherwise, the other top corner only when that covers less of a face) on the
+  safe box's edge; balloons search only where their outline, tail and notes stay inside it (a tail that cannot
+  is dropped, as one crossing the caption); notes and sound effects likewise. A panel whose lettering finds no
+  safe spot raises `comic_lettering_no_space` and `render_page` raises `comic_lettering_overflow` if any
+  reported box is still outside: the page is drawn again, never printed unsafe.
+- **Covers:** shares of the 2063 × 3150 art, `print_safe.CoverSafe(top=0.07, bottom=0.11, width=0.78)` (the
+  front's `SAFE_TOP`, `SAFE_BOTTOM`, `SAFE_WIDTH`): 227, 227, 220 and 347 px, at least the Books app's cover box
+  (219, 219, 200, 246). The back cover's blurb panel is 78% wide (it was 80%, 0.495 in inside Lulu's trim), and
+  the footer and stamps stand on the same bottom. `render_cover(print_safe=...)` and
+  `render_back_cover(print_safe=...)` take the same value.
+
+`print_safe` is a `PrintSafe` or the Books app's dict; a key left out keeps its default, and a negative,
+non-numeric or empty box raises `ValueError("comic_print_safe_invalid: ...")` before any image call:
+
+```json
+{"page_inset_px": {"left": 168, "right": 168, "top": 148, "bottom": 148},
+ "cover_inset": {"top": 0.07, "bottom": 0.11, "width": 0.78}}
+```
+
+(`cover_inset` may instead be px of the cover: `{"top_px", "bottom_px", "side_px"}`.) A page of another size than
+2063 × 3150 has the page insets scaled to it.
+
+**Lettering boxes.** Every lettered element is reported, so the print builder can check it against the real
+placement of whichever printer gets the order:
+
+- `PageRenderer.render_page(panels, path, page=None)` leaves them in `renderer.lettering_boxes` (reset per page).
+- `render_cover(..., lettering_boxes=[])` and `render_back_cover(..., lettering_boxes=[])` append to the list given
+  (also `letter_cover(report=...)`, `letter_back_cover(report=...)`).
+
+Each entry is `{"kind", "page", "box_px": [x, y, w, h]}`, in px of the 2063 × 3150 page or cover (x, y: top-left;
+every lettered pixel of the element lies inside it):
+
+| `kind` | Where | Box |
+|---|---|---|
+| `caption` | page | the caption's box with its outline |
+| `balloon` | page | every pixel the balloon changed: outline, tail, song notes |
+| `note` | page | the dedication note's box |
+| `sfx` | page | the sound effect's tilted word |
+| `title`, `subtitle`, `footer` | front | the line's text box (`subtitle` is the starring line) |
+| `logo` | front | the badge, when one is drawn |
+| `blurb` | back | the dark panel with the tagline and blurb (and any blurb text running past it) |
+| `footer` | back | the footer line (one entry per wrapped block) |
+| `logo`, `barcode`, `stamp` | back | each stamp drawn, by `CornerStamp.kind` (default `stamp`) |
+
+`page` is the `page` argument of `render_page` (`None` when not given), `"front"` or `"back"`. The Books bridge
+writes them into the attempt's `validation.json` as `"lettering_boxes"`: the page's entries (and, for the covers
+part, the front's and the back's), for example
+`{"kind": "caption", "page": 7, "box_px": [168, 148, 853, 268]}`. A box does not include the soft shadow under
+cover lines (dark, at most 17 px below a line, still at least 5 mm inside BookPod's trim and 26 mm inside Lulu's).
+
 Script fields (all optional; older `cast.json` / `script_NN.json` files still work):
 
 | Field | Where | Meaning |

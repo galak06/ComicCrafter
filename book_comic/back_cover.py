@@ -19,6 +19,7 @@ from book_comic.seam import find_seam
 from book_comic.cover_lettering import CoverFonts
 from book_comic.image_prompts import back_cover_prompt
 from book_comic.margins import trim_margins
+from book_comic.print_safe import as_print_safe
 from book_comic.rejected_art import report as report_rejected
 from book_comic.render import image_url
 from generation.openrouter_image_client import OpenRouterImageClient, closest_aspect_ratio
@@ -52,6 +53,8 @@ def render_back_cover(
     dpi: Optional[int] = None,
     audit=None, on_reject=None,
     stamps: Sequence = (),
+    print_safe=None,
+    lettering_boxes: Optional[list] = None,
 ) -> Path:
     """Draw and letter the back cover; at most ATTEMPTS image calls, then the least-bad draw without a hard defect.
 
@@ -67,7 +70,12 @@ def render_back_cover(
             stand on the print-safe bottom margin under the text, the same corners in every language, and the
             footer line is kept between them (back_cover_lettering.letter_back_cover); they never change a draw
             or the outcome. Empty (the default) saves exactly the back cover drawn without this argument
+        print_safe: The print-safe box (print_safe.PrintSafe or the Books app's dict); its cover shares place the
+            blurb panel, the footer and the stamps. None is print_safe.DEFAULT_PRINT_SAFE
+        lettering_boxes: When given, gets {"kind": blurb|footer|logo|barcode|stamp, "page": "back", "box_px": [x, y, w, h]}
+            for every lettered element (README, Lettering boxes)
     """
+    safe = as_print_safe(print_safe).cover  # a bad override fails before any image call
     references, roles = ([image_url(style_art)], ["style"]) if style_art is not None else ([], [])
     prompt = back_cover_prompt(cast, back, size, roles)
     rejected = []
@@ -114,7 +122,12 @@ def render_back_cover(
             raise ArtCheckError("comic_back_cover_rejected")
 
     dpi_tag = {"dpi": (dpi, dpi)} if dpi else {}
-    lettered = letter_back_cover(art, back, fonts, stamps=stamps) if stamps else letter_back_cover(art, back, fonts)
+    extra = {"stamps": stamps} if stamps else {}
+    if print_safe is not None:
+        extra["safe"] = safe
+    if lettering_boxes is not None:
+        extra["report"] = lettering_boxes
+    lettered = letter_back_cover(art, back, fonts, **extra)
     lettered.save(path, format="PNG", optimize=True, **dpi_tag)
     logger.info(f"Saved back cover {path}")
     return path

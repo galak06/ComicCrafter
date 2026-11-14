@@ -42,7 +42,7 @@ def box_of(image, colour):
 
 def panel_bottom(image):
     """The last row of the dark text panel, read just inside its left edge above the stamps (the art is one flat colour)."""
-    column = np.asarray(image)[: image.height * 2 // 3, int(image.width * 0.105)]
+    column = np.asarray(image)[: image.height * 2 // 3, int(image.width * (1 - SAFE_WIDTH) / 2) + 10]
     return int(np.where(np.any(column != column[0], axis=1))[0].max())
 
 

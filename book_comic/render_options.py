@@ -9,6 +9,7 @@ from typing import Optional, Union
 
 from PIL import Image
 
+from book_comic.print_safe import PrintSafe
 from book_comic.revise import data_url
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,11 @@ class RenderOptions:
             (each sent as a JPEG of at most 1536 px), or an http(s) URL (sent as it is). It is the last reference of
             each panel draw (role "palette"), never of the character sheet, and the art check never sees it. A
             file that cannot be read draws the panels without it. None (the default) changes nothing
+        print_safe: The box every caption, balloon, note and sound effect stays inside so it prints inside every
+            comic printer's safe area (book_comic.print_safe): a PrintSafe, or the Books app's dict
+            {"page_inset_px": {"left", "right", "top", "bottom"}, "cover_inset": {...}}. None (the default) is
+            print_safe.DEFAULT_PRINT_SAFE, the strictest of Lulu and BookPod: 168 px at the sides, 148 px at the
+            top and bottom of the 2063 x 3150 page
     """
     font_path: Optional[str] = None
     fail_on_image_error: bool = False
@@ -48,6 +54,7 @@ class RenderOptions:
     dpi: Optional[int] = None
     rejected_dir: Optional[Path] = None
     style_ref: Optional[StyleRef] = None
+    print_safe: Optional[Union[PrintSafe, dict]] = None
 
 
 def palette_reference(source: Optional[StyleRef]) -> Optional[str]:

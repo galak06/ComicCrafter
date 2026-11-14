@@ -24,8 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 def letter_sfx(renderer, art: Image.Image, lettered: Image.Image, text: str, rtl: bool,
-               type_height: Optional[int] = None, plan: Optional[BubblePlan] = None) -> Image.Image:
+               type_height: Optional[int] = None, plan: Optional[BubblePlan] = None, safe=None,
+               report: Optional[list] = None) -> Image.Image:
     """The lettered panel with its sound effect, or unchanged when it cannot be placed. Never raises.
+
+    safe: the print-safe box in the panel's px (layout.sound_effects.draw_sfx); report, when given, gets
+    ("sfx", its box) for a placed effect.
 
     plan is the bubble plan the panel was lettered with (its "sfx" point rode that same vision call). A panel
     with nothing else to letter passes None: the planner is then asked once, and an unusable answer leaves
@@ -42,10 +46,13 @@ def letter_sfx(renderer, art: Image.Image, lettered: Image.Image, text: str, rtl
         else:
             panel = lettered.convert("RGB")
             box, entry["reason"] = draw_sfx(panel, text, plan.sfx, _subjects(plan, panel.size), rtl, type_height,
-                                            ink=lettering_ink(art, lettered), font_path=renderer.options.font_path)
+                                            ink=lettering_ink(art, lettered), font_path=renderer.options.font_path,
+                                            **({"safe": safe} if safe is not None else {}))
             if box:
                 result = panel
                 entry.update(placed=True, box=list(box))
+                if report is not None:
+                    report.append(("sfx", tuple(box)))
     except Exception as error:  # decoration only: the page is never lost to its sound effect
         logger.warning(f"Sound effect left out: {error}")
         result = lettered

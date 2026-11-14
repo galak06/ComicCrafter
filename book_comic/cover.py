@@ -20,6 +20,7 @@ from book_comic.art_check import ArtCheckError, inspect_art, request_art, requir
 from book_comic.cover_badge import CoverBadge, as_badge
 from book_comic.cover_lettering import CoverFonts, letter_cover, top_title_shrink
 from book_comic.image_prompts import cover_prompt, cover_requirements
+from book_comic.print_safe import as_print_safe
 from book_comic.rejected_art import report as report_rejected
 from book_comic.revise import data_url, revision_prompt
 from book_comic.render import RTL_LANGUAGES, image_url
@@ -57,10 +58,10 @@ def _high_heads(rejected) -> list:
     return [i for i, (_, _, report) in enumerate(rejected) if report.get("head_in_margin")]
 
 
-def title_goes_bottom(head: float, size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None) -> bool:
+def title_goes_bottom(head: float, size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None, safe=None) -> bool:
     """Whether the head (its top, as a share of the height) would touch the top title block of this cover, even with
-    the title at its smallest (cover_lettering.top_title_shrink)."""
-    return top_title_shrink(head, size, cover, fonts, HEAD_GAP) is None
+    the title at its smallest (cover_lettering.top_title_shrink). safe: the cover's print_safe.CoverSafe (None: default)."""
+    return top_title_shrink(head, size, cover, fonts, HEAD_GAP, safe) is None
 
 
 def panel_strip(arts: Sequence[Image.Image], height: int = 512, gap: int = 16) -> Optional[Image.Image]:
@@ -90,6 +91,8 @@ def render_cover(
     dpi: Optional[int] = None,
     requirements=(), prop_anchors=None, audit=None, on_reject=None, art_path: Optional[Path] = None,
     badge: Optional[Union[CoverBadge, Dict]] = None,
+    print_safe=None,
+    lettering_boxes: Optional[list] = None,
 ) -> Path:
     """Draw and letter the cover; at most ATTEMPTS image calls.
 
@@ -117,7 +120,12 @@ def render_cover(
             It goes in a print-safe corner clear of the lettering and, as far as the measured head and the art
             itself tell, of the figure (cover_badge.place_badge), or nowhere; it never changes a draw, the
             lettering or the outcome. None (the default) saves exactly the cover drawn without this argument
+        print_safe: The print-safe box (print_safe.PrintSafe or the Books app's dict); its cover shares place the
+            lettering. None is print_safe.DEFAULT_PRINT_SAFE
+        lettering_boxes: When given, gets {"kind": title|subtitle|footer|logo, "page": "front", "box_px": [x, y, w, h]}
+            for every lettered element (README, Lettering boxes)
     """
+    safe = as_print_safe(print_safe).cover  # a bad override fails before any image call
     # A cover keeps its own framing: the prompt strips the scene's shot and limb-only clauses (image_prompts.cover_prompt);
     # the check uses the same scene and the same requirements, without framing.
     requirements = cover_requirements(cover_scene(cover.get("scene", "")), requirements)
@@ -197,7 +205,11 @@ def render_cover(
     if badge and badge.rtl is None and language:  # the comic's language decides the corner, as it decides page lettering
         badge = replace(badge, rtl=language in RTL_LANGUAGES)
     extra = {"badge": badge, "head_top": head} if badge else {}  # the badge keeps off the figure: above the measured head
-    shrink = top_title_shrink(head, art.size, cover, fonts, HEAD_GAP)
+    if print_safe is not None:
+        extra["safe"] = safe
+    if lettering_boxes is not None:
+        extra["report"] = lettering_boxes
+    shrink = top_title_shrink(head, art.size, cover, fonts, HEAD_GAP, safe)
     if shrink is not None and shrink < 1:
         extra["title_shrink"] = shrink
     letter_cover(art, cover, fonts, title_at_bottom=shrink is None, **extra).save(path, format="PNG", optimize=True, **dpi_tag)
