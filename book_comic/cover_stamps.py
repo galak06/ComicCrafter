@@ -17,7 +17,7 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 Box = Tuple[int, int, int, int]  # left, top, right, bottom in px
-Placed = Tuple[Image.Image, Box]
+Placed = Tuple[Image.Image, Box]  # (picture, box); the picture carries its stamp's kind in .info["stamp_kind"]
 
 CORNERS = ("left", "right")
 WIDTH_RANGE = (0.06, 0.25)  # of the cover width: narrower is unreadable in print, wider crowds the footer between the corners
@@ -34,18 +34,20 @@ class CornerStamp:
         path: An image file (its alpha, when it has one, is kept)
         corner: "left" or "right": the side of the cover as printed, the same in Hebrew and English
         width: Stamp width as a share of the cover width, kept within WIDTH_RANGE (0.06 to 0.25)
+        kind: What it is, for the lettering report only ("logo", "barcode"; default "stamp")
     """
     path: Union[str, Path]
     corner: str = "right"
     width: float = 0.14
+    kind: str = "stamp"
 
 
 def as_stamps(stamps) -> List[CornerStamp]:
-    """CornerStamps from a list of CornerStamp or {"path", "corner", "width"} dicts; anything else is dropped."""
+    """CornerStamps from a list of CornerStamp or {"path", "corner", "width", "kind"} dicts; anything else is dropped."""
     found = []
     for stamp in stamps if isinstance(stamps, (list, tuple)) else ():
         if isinstance(stamp, dict) and stamp.get("path"):
-            stamp = CornerStamp(**{key: stamp[key] for key in ("path", "corner", "width") if key in stamp})
+            stamp = CornerStamp(**{key: stamp[key] for key in ("path", "corner", "width", "kind") if key in stamp})
         if isinstance(stamp, CornerStamp) and stamp.corner in CORNERS:
             found.append(stamp)
     return found
@@ -75,12 +77,15 @@ def _boxes(pictures: Sequence[Tuple[CornerStamp, Image.Image]], shrink: float, c
     inset, bottom, gap = math.ceil(w * (1 - safe_width) / 2), h - math.ceil(h * safe_bottom), h // 50
     placed: List[Optional[Placed]] = []
     for stamp, full in pictures:
+        full.info["stamp_kind"] = str(stamp.kind or "stamp")
         size = (max(1, round(full.width * shrink)), max(1, round(full.height * shrink)))
         left = inset if stamp.corner == "left" else w - inset - size[0]
         box = (left, bottom - size[1], left + size[0], bottom)
         fits = box[1] >= top and (shrink == 1 or size[0] >= WIDTH_RANGE[0] * w)
         apart = all(other is None or box[2] + gap <= other[1][0] or other[1][2] + gap <= box[0] for other in placed)
-        placed.append((full if shrink == 1 else full.resize(size, Image.Resampling.LANCZOS), box) if fits and apart else None)
+        picture = full if shrink == 1 else full.resize(size, Image.Resampling.LANCZOS)
+        picture.info["stamp_kind"] = full.info["stamp_kind"]
+        placed.append((picture, box) if fits and apart else None)
     return placed
 
 

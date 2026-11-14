@@ -30,6 +30,7 @@ HEBREW_FONT_CANDIDATES = [
 ]
 HEBREW_CHARS = re.compile(r"[֐-׿]")
 Rect = Tuple[int, int, int, int]  # x, y, width, height
+Bounds = Tuple[int, int, int, int]  # left, top, right, bottom: a pixel (x, y) is inside when left <= x < right, top <= y < bottom
 CAPTION_FILL = (243, 227, 181)
 INK = (0, 0, 0)
 PAPER = (255, 255, 255)

@@ -106,3 +106,24 @@ def test_a_full_page_splash_keeps_its_caption_in_a_top_corner_clear_of_the_bubbl
     box = assert_top_corner(lettered, rtl)
     plan = BubblePlan(speakers=[(0.5, 0.3)], bubbles=[(0.3, 0.06)], protected=SUBJECTS[subjects])
     assert_caption_untouched(art, caption, plan, lettered, box, rtl, type_height=PANEL[1])
+
+
+@pytest.mark.parametrize("rtl", [False, True], ids=["ltr", "rtl"])
+def test_on_a_printed_page_every_caption_sits_in_the_reading_first_corner_of_the_print_safe_box(tmp_path, rtl):
+    """A Hebrew caption is top-right and an English one top-left on every strip panel, moved in from the panel's
+    edge to the print-safe box (168 px at the sides of the 2063 px page; 148 px from its top), never past it."""
+    from book_comic.print_safe import DEFAULT_PRINT_SAFE
+    from book_comic.render import print_layouts
+    caption, lines = TEXTS["long"][rtl]
+    answer = {"lines": [{"mouth": [500, 600], "bubble": [500, 700]}], "protected": []}
+    renderer = PageRenderer({"style": "ink comic", "language": "he" if rtl else "en",
+                             "characters": [{"name_en": "Hero", "look": "teal blazer"}]},
+                            FakeImages([Image.new("RGB", (64, 64), "#7f97a3")]), FakeVision(lambda p, i: answer),
+                            print_layouts(), RenderOptions(font_path=FONT))
+    panel = {"scene": "Wide shot: the hills", "caption": caption, "dialogue": [{"text": lines[0], "speaker": "Hero"}]}
+    renderer.render_page([panel] * 3, tmp_path / "page.png")
+    left, top, right, _ = DEFAULT_PRINT_SAFE.page_bounds()
+    captions = [b["box_px"] for b in renderer.lettering_boxes if b["kind"] == "caption"]
+    assert len(captions) == 3 and captions[0][1] == top
+    for x, y, w, h in captions:
+        assert (x + w == right) if rtl else (x == left)

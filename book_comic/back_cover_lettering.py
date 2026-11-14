@@ -13,12 +13,15 @@ from typing import Dict, Optional, Sequence, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
 from book_comic.cover_badge import TOP_SAFE
-from book_comic.cover_lettering import SAFE_BOTTOM, SAFE_WIDTH, CoverFonts, _shadowed_text, resolve_font
+from book_comic.cover_lettering import CoverFonts, _shadowed_text, resolve_font
+from book_comic.print_safe import DEFAULT_COVER_SAFE, CoverSafe, lettering_box
 from book_comic.cover_stamps import draw_stamps, fit_stamps, room_between
 from layout.lettering import _wrap, is_rtl
 
 PANEL_TOP = 0.2      # the panel starts a fifth of the way down
-PANEL_WIDTH = 0.8    # share of the cover width
+# The panel is as wide as the cover's print-safe box (CoverSafe.width, 78%): at 80% its edge printed 12.6 mm
+# (0.495 in) inside Lulu's trim, inside the 12.7 mm margin.
+PANEL_WIDTH = DEFAULT_COVER_SAFE.width
 MAX_HEIGHT = 0.55    # the panel never reaches past three quarters of the height
 PANEL_FILL = (12, 14, 22, 175)
 TAGLINE_SIZE = 0.052  # share of the width
@@ -51,22 +54,32 @@ def _fit_blurb(draw, blurb: str, path, width: int, room: int, cover_width: int):
         size = max(floor, int(size * 0.92))
 
 
-def _footer_and_stamps(page: Image.Image, back: Dict, fonts: CoverFonts, stamps, text_end: Optional[int]) -> None:
+def _footer_and_stamps(page: Image.Image, back: Dict, fonts: CoverFonts, stamps, text_end: Optional[int],
+                       safe: CoverSafe = DEFAULT_COVER_SAFE, report: Optional[list] = None) -> None:
     """The footer line at the bottom margin and the stamps in the bottom corners, one lettering gap under the text
     (which ends at text_end; None for a back cover without text). A footer beside stamps is wrapped between them."""
     w, h = page.size
     gap = h // 50
-    placed = fit_stamps(stamps, page.size, text_end + gap if text_end is not None else math.ceil(h * TOP_SAFE), SAFE_BOTTOM, SAFE_WIDTH) if stamps else []
+    top = text_end + gap if text_end is not None else math.ceil(h * max(TOP_SAFE, safe.top))
+    placed = fit_stamps(stamps, page.size, top, safe.bottom, safe.width) if stamps else []
     if back.get("footer"):
         font = ImageFont.truetype(str(fonts.footer), max(14, int(h * 0.022)))
         between = room_between(placed, w, gap)
-        width = int(w * SAFE_WIDTH) if between is None else min(int(w * SAFE_WIDTH), between)
+        width = int(w * safe.width) if between is None else min(int(w * safe.width), between)
         # Inside the printers' text margin, as the front cover's lettering (cover_lettering.SAFE_BOTTOM).
-        _shadowed_text(page, back["footer"], font, width, h - math.ceil(h * SAFE_BOTTOM), align_bottom=True, blur=max(3, h // 400))
+        boxes: list = []
+        _shadowed_text(page, back["footer"], font, width, h - math.ceil(h * safe.bottom), align_bottom=True,
+                       blur=max(3, h // 400), boxes=boxes)
+        if report is not None:
+            report += [lettering_box("footer", "back", (l, t, r - l, b - t)) for l, t, r, b in boxes]
     draw_stamps(page, placed)
+    if report is not None:
+        report += [lettering_box(picture.info.get("stamp_kind", "stamp"), "back", (l, t, r - l, b - t))
+                   for picture, (l, t, r, b) in placed]
 
 
-def letter_back_cover(image: Image.Image, back: Dict, fonts: Optional[CoverFonts] = None, stamps: Sequence = ()) -> Image.Image:
+def letter_back_cover(image: Image.Image, back: Dict, fonts: Optional[CoverFonts] = None, stamps: Sequence = (),
+                      safe: Optional[CoverSafe] = None, report: Optional[list] = None) -> Image.Image:
     """Letter the back cover art.
 
     Args:
@@ -77,12 +90,18 @@ def letter_back_cover(image: Image.Image, back: Dict, fonts: Optional[CoverFonts
             dicts): each stands on SAFE_BOTTOM in its corner of the print-safe box, one lettering gap (2% of the
             height) or more under the text, drawn smaller (down to 75%) or left out when the text leaves too
             little room. The footer is then wrapped to the width between them. Empty letters exactly as before
+        safe: The cover's print-safe box (print_safe.CoverSafe; None is the default): the panel is as wide as it and
+            starts no higher than its top, and the footer and stamps stand on its bottom
+        report: When given, gets {"kind": blurb|footer|logo|barcode|stamp, "page": "back", "box_px": [x, y, w, h]}
+            for the panel (with any blurb text running past it), the footer and each stamp
     """
     fonts = fonts or CoverFonts()
+    safe = safe or DEFAULT_COVER_SAFE
     page = image.convert("RGBA")
     w, h = page.size
     draw = ImageDraw.Draw(page)
-    panel_w = int(w * PANEL_WIDTH)
+    side = safe.side_px(w)
+    panel_w = w - 2 * side
     pad = max(12, w // 28)
     inner = panel_w - 2 * pad
     tagline, blurb = (back.get("tagline") or "").strip(), (back.get("blurb") or "").strip()
@@ -99,10 +118,10 @@ def letter_back_cover(image: Image.Image, back: Dict, fonts: Optional[CoverFonts
         blurb_font, blurb_text, blurb_h = _fit_blurb(draw, blurb, fonts.starring, inner, room, w)
     if not tagline and not blurb:
         if stamps:
-            _footer_and_stamps(page, {}, fonts, stamps, None)
+            _footer_and_stamps(page, {}, fonts, stamps, None, safe, report)
         return page.convert("RGB")
     panel_h = min(int(h * MAX_HEIGHT), 2 * pad + tag_h + gap + blurb_h)
-    x0, y0 = (w - panel_w) // 2, int(h * PANEL_TOP)
+    x0, y0 = side, max(int(h * PANEL_TOP), math.ceil(h * safe.top))
     shade = Image.new("RGBA", page.size, (0, 0, 0, 0))
     ImageDraw.Draw(shade).rounded_rectangle([x0, y0, x0 + panel_w, y0 + panel_h], radius=max(6, w // 60), fill=PANEL_FILL)
     page.alpha_composite(shade)
@@ -122,5 +141,8 @@ def letter_back_cover(image: Image.Image, back: Dict, fonts: Optional[CoverFonts
         draw.multiline_text(((w - (right - left)) // 2 - left, y - top), blurb_text, font=blurb_font,
                             fill=(240, 240, 240, 255), **style)
     # A blurb too long for the panel at its smallest face runs past it: the text ends where the blurb does.
-    _footer_and_stamps(page, back, fonts, stamps, max(y0 + panel_h, y + blurb_h))
+    text_end = max(y0 + panel_h, y + blurb_h)
+    if report is not None:
+        report.append(lettering_box("blurb", "back", (x0, y0, panel_w + 1, text_end - y0 + 1)))
+    _footer_and_stamps(page, back, fonts, stamps, text_end, safe, report)
     return page.convert("RGB")

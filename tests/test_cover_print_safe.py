@@ -63,8 +63,9 @@ def test_cover_lettering_prints_inside_the_margin(printer, at_bottom, cover, lin
     for line in found:
         mm = inside_trim_mm(line, PRINTERS[printer])
         assert mm["bottom"] >= MARGIN_MM and mm["side"] >= MARGIN_MM
-        # A top title on BookPod's B5 is 8.6 mm inside the trim: past its own 5 mm text line, short of Lulu's margin.
-        assert mm["top"] >= (MARGIN_MM if printer == "lulu" else 8)
+        # A top title is 15.5 mm inside Lulu's trim (SAFE_TOP 0.07; it was 13.9 mm at 0.064) and 10.2 mm inside
+        # BookPod's B5: past its own 5 mm text line with 1 mm to spare, short of Lulu's margin.
+        assert mm["top"] >= (MARGIN_MM + 1 if printer == "lulu" else 5 + 1)
 
 
 def test_the_bottom_title_block_of_books_45_moved_out_of_the_margin():
@@ -140,7 +141,8 @@ def test_the_top_block_is_measured_as_it_is_lettered(cover):
 
 
 def test_the_real_titles_need_thirteen_and_fifteen_percent_of_the_height():
-    assert round(top_block_end((W, H), TITLES["he"]), 3) == 0.131 and round(top_block_end((W, H), TITLES["en"]), 3) == 0.154
+    # 0.131 and 0.154 on the real covers; 0.6% more since SAFE_TOP moved from 0.064 to 0.07 (print_safe.CoverSafe)
+    assert round(top_block_end((W, H), TITLES["he"]), 3) == 0.137 and round(top_block_end((W, H), TITLES["en"]), 3) == 0.16
     assert top_block_end((W, H), {}) == int(H * SAFE_TOP) / H  # nothing to letter at the top: only the margin
     assert top_block_end((W, H), {"title": "Go"}) < top_block_end((W, H), TITLES["he"])  # no starring line: a shorter block
 
@@ -150,7 +152,7 @@ def test_the_real_titles_need_thirteen_and_fifteen_percent_of_the_height():
 def test_the_title_stays_at_the_top_when_the_head_starts_below_its_block(tmp_path, monkeypatch, head, bottom, cover):
     assert title_goes_bottom(head, (W, H), TITLES[cover]) is bottom
     bottoms = []
-    monkeypatch.setattr(cover_module, "letter_cover", lambda art, c, f, title_at_bottom: bottoms.append(title_at_bottom) or art)
+    monkeypatch.setattr(cover_module, "letter_cover", lambda art, c, f, title_at_bottom, **k: bottoms.append(title_at_bottom) or art)
     render_cover(CAST, {"scene": "Dana on the cliff", **TITLES[cover]}, (W // 4, H // 4), tmp_path / "cover.png",
                  FakeImages([Image.new("RGB", (W // 4, H // 4), "red")]), FakeVision(lambda p, i: {**CLEAN, "head_top": head * 1000}))
     assert bottoms == [bottom]
@@ -163,8 +165,8 @@ def test_the_title_moves_only_when_the_head_would_touch_its_block():
         assert MIN_TITLE_SHRINK <= top_title_shrink(limit - 0.001, (W, H), cover, gap=HEAD_GAP) < 1  # a little smaller, still at the top
         lowest = top_block_end((W, H), cover, title_shrink=MIN_TITLE_SHRINK) + HEAD_GAP  # the block with the smallest title
         assert title_goes_bottom(lowest - 0.001, (W, H), cover) and not title_goes_bottom(lowest, (W, H), cover)
-    assert round(top_block_end((W, H), TITLES["he"]) + HEAD_GAP, 3) == 0.151  # the Hebrew cover's head, 0.176, clears it
-    assert round(top_block_end((W, H), TITLES["en"]) + HEAD_GAP, 3) == 0.174  # the English cover's head, 0.191, clears it
+    assert round(top_block_end((W, H), TITLES["he"]) + HEAD_GAP, 3) == 0.157  # the Hebrew cover's head, 0.176, clears it
+    assert round(top_block_end((W, H), TITLES["en"]) + HEAD_GAP, 3) == 0.18  # the English cover's head, 0.191, clears it
 
 
 def test_a_head_in_the_margin_on_every_draw_never_loses_the_cover(tmp_path, monkeypatch):
@@ -172,3 +174,99 @@ def test_a_head_in_the_margin_on_every_draw_never_loses_the_cover(tmp_path, monk
     calls, bottoms = render(tmp_path, monkeypatch, [0.04, 0.05, 0.06], audit)
     assert len(calls) == 3 and bottoms == [True]
     assert [r.get("fallback") for r in audit] == [None, None, True]  # the last draw is kept
+
+
+# The Books app's strictest cover box (print_safe.APP_COVER_INSETS_PX: left, right, top, bottom px of the 2063 x 3150 art).
+APP_BOX = (219, 219, 200, 246)
+STAMP_COLOURS = {"logo": (15, 118, 110), "barcode": (250, 240, 200)}
+BLURB = {"tagline": "The storm is only the beginning",
+         "blurb": "When the old lighthouse goes dark, Maya and her grandfather follow a trail of strange lights along "
+                  "the cliffs, through the drowned village and into the caves beneath the sea, where something has been "
+                  "waiting for a hundred years.",
+         "footer": "For my dearest grandfather, with all the love in the world, from all of us at home"}
+HE_BLURB = {"tagline": "הסערה היא רק ההתחלה",
+            "blurb": "כשהמגדלור הישן כבה, מאיה וסבא שלה יוצאים בעקבות אורות מוזרים לאורך הצוקים, דרך הכפר הטבוע ואל "
+                     "המערות שמתחת לים, שם משהו מחכה כבר מאה שנה.", "footer": "בשביל סבא, באהבה"}
+LONG_BLURB = {**BLURB, "blurb": " ".join([BLURB["blurb"]] * 6)}  # runs to the smallest blurb face
+
+
+def changed_box(before, after):
+    """(top, bottom, left, right) of every pixel the lettering changed, as lettered_lines gives a line."""
+    ys, xs = np.where(np.any(np.asarray(before.convert("RGB")) != np.asarray(after), axis=2))
+    return int(ys.min()), int(ys.max()) + 1, int(xs.min()), int(xs.max()) + 1
+
+
+def inside_app_box(box_px):
+    x, y, w, h = box_px
+    return x >= APP_BOX[0] and x + w <= W - APP_BOX[1] and y >= APP_BOX[2] and y + h <= H - APP_BOX[3]
+
+
+@pytest.fixture
+def stamp_files(tmp_path):
+    Image.new("RGB", (600, 470), STAMP_COLOURS["logo"]).save(tmp_path / "logo.png")
+    Image.new("RGB", (520, 1060), STAMP_COLOURS["barcode"]).save(tmp_path / "barcode.png")
+    return [{"path": str(tmp_path / "logo.png"), "corner": "right", "width": 0.14, "kind": "logo"},
+            {"path": str(tmp_path / "barcode.png"), "corner": "left", "width": 0.12, "kind": "barcode"}]
+
+
+@pytest.mark.parametrize("printer", PRINTERS)
+@pytest.mark.parametrize("back", [BLURB, HE_BLURB, LONG_BLURB], ids=["en", "he", "long"])
+def test_the_back_cover_blurb_panel_and_stamps_print_inside_the_margin(printer, back, stamp_files):
+    """BOOKS-48: the blurb panel's edge printed 0.495 in inside Lulu's trim (80% wide); at 78% it is 14.4 mm."""
+    plain = Image.new("RGB", (W, H), (90, 120, 160))
+    report = []
+    lettered = letter_back_cover(plain, back, stamps=stamp_files, report=report)
+    kinds = [b["kind"] for b in report]
+    assert kinds == ["blurb", "footer", "footer", "logo", "barcode"] or kinds == ["blurb", "footer", "logo", "barcode"]
+    for box in report:
+        assert box["page"] == "back" and inside_app_box(box["box_px"]), box
+        x, y, w, h = box["box_px"]
+        mm = inside_trim_mm((y, y + h, x, x + w), PRINTERS[printer])
+        assert min(mm.values()) >= MARGIN_MM, box
+    # Every changed pixel, the panel's shade and the lines' soft shadows too, against the printer's own margin plus
+    # 1 mm (Lulu 12.7 mm, BookPod 5 mm): the footer's shadow reaches 17 px under its line, 12.9 mm inside BookPod's trim.
+    own = (12.7 if printer == "lulu" else 5) + 1
+    assert min(inside_trim_mm(changed_box(plain, lettered), PRINTERS[printer]).values()) >= own
+    for kind, colour in STAMP_COLOURS.items():  # the stamps are where the report says
+        ys, xs = np.where(np.all(np.asarray(lettered) == colour, axis=2))
+        box = next(b["box_px"] for b in report if b["kind"] == kind)
+        assert (int(xs.min()), int(ys.min()), int(xs.max()) - int(xs.min()) + 1, int(ys.max()) - int(ys.min()) + 1) == tuple(box)
+
+
+# Four lines and more: the title (one line, however long), a starring line and a footer that each wrap to two.
+BLOCK = {"title": "The Truly Extraordinary and Completely Unbelievable Summer Adventure of Grandpa Maximilian",
+         "starring": LONG["starring"], "footer": LONG["footer"]}
+HE_BLOCK = {"title": "ההרפתקה המופלאה והבלתי נשכחת של סבא מקסימיליאן והכלב שלו בקיץ של שנת אלפיים", "starring": "בכיכוב דנה, נועה, "
+            "יואב, מאיה, עומר ודני מהשכונה הישנה ליד הים", "footer": "בשביל סבא, באהבה גדולה מכל המשפחה שלנו בבית ומכל החברים"}
+
+
+@pytest.mark.parametrize("printer", PRINTERS)
+@pytest.mark.parametrize("at_bottom", [True, False], ids=["bottom", "top"])
+@pytest.mark.parametrize("cover", [BLOCK, HE_BLOCK], ids=["en", "he"])
+def test_a_tall_front_block_prints_inside_the_margin_and_is_reported(printer, at_bottom, cover):
+    report = []
+    lettered = letter_cover(Image.new("RGB", (W, H), (90, 120, 160)), cover, title_at_bottom=at_bottom, report=report)
+    lines = lettered_lines(lettered)
+    assert len(lines) >= 4
+    for line in lines:
+        mm = inside_trim_mm(line, PRINTERS[printer])
+        assert mm["bottom"] >= MARGIN_MM and mm["side"] >= MARGIN_MM
+        assert mm["top"] >= (MARGIN_MM + 1 if printer == "lulu" else 5 + 1)
+    assert sorted(b["kind"] for b in report) == ["footer", "subtitle", "title"]
+    for box in report:
+        assert box["page"] == "front" and inside_app_box(box["box_px"]), box
+    for top, bottom, left, right in lines:  # every white line lies in a reported box
+        assert any(b["box_px"][0] <= left and right <= b["box_px"][0] + b["box_px"][2] + 1 and
+                   b["box_px"][1] <= top + 1 and bottom <= b["box_px"][1] + b["box_px"][3] + 1 for b in report)
+
+
+def test_render_cover_and_render_back_cover_report_their_boxes(tmp_path):
+    from book_comic.back_cover import render_back_cover
+    front, back = [], []
+    vision = FakeVision(lambda p, i: {**CLEAN, "head_top": 400, "figure_visible": False})
+    render_cover(CAST, {"scene": "Dana on the cliff", **SHORT}, (W, H), tmp_path / "cover.png",
+                 FakeImages([Image.new("RGB", (W, H), (90, 120, 160))]), vision, lettering_boxes=front)
+    render_back_cover(CAST, {"scene": "The cliff at dusk", **BLURB}, (W, H), tmp_path / "back.png",
+                      FakeImages([Image.new("RGB", (W, H), (90, 120, 160))]), vision, lettering_boxes=back)
+    assert [b["kind"] for b in front] == ["title", "subtitle"] and all(inside_app_box(b["box_px"]) for b in front)
+    assert [b["kind"] for b in back][:2] == ["blurb", "footer"] and all(inside_app_box(b["box_px"]) for b in back)

@@ -11,7 +11,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
-from layout.lettering import FONTS_DIR, INK, PAPER, Rect, _font, _hits, is_rtl
+from layout.lettering import FONTS_DIR, INK, PAPER, Bounds, Rect, _font, _hits, is_rtl
 
 SFX_FONT = FONTS_DIR / "Rubik-Black.ttf"  # bundled, Hebrew and Latin
 SIZE_STEPS = (1.6, 1.45, 1.3, 1.15, 1.0)  # of the dialogue size: the largest that fits and finds a spot is drawn
@@ -92,17 +92,21 @@ def _target(near, size: Tuple[int, int], box: Tuple[int, int], rtl: bool, margin
 
 
 def find_spot(size: Tuple[int, int], box: Tuple[int, int], target: Point, obstacles: Sequence[Rect],
-              ink: Optional[Image.Image] = None) -> Optional[Tuple[int, int]]:
+              ink: Optional[Image.Image] = None, safe: Optional[Bounds] = None) -> Optional[Tuple[int, int]]:
     """Top-left corner of the free spot whose centre is nearest target (the bubbles' grid search), or None.
 
-    Free: inside the panel's edge margin, a gap away from every obstacle rectangle and from every inked pixel.
+    Free: inside the panel's edge margin and inside safe (left, top, right, bottom: the print-safe box in the panel's
+    px; None is the whole panel), a gap away from every obstacle rectangle and from every inked pixel.
     """
     w, h = size
     bw, bh = box
     gap, edge = max(6, h // 80), max(8, h // 40)  # the bubbles' gap; the captions' distance from the panel edge
+    sl, st, sr, sb = safe or (0, 0, w, h)
+    x_lo, y_lo = max(edge, sl), max(edge, st)
+    x_hi, y_hi = min(w - bw - edge, sr - bw), min(h - bh - edge, sb - bh)
     spots = [(math.hypot(x0 + bw / 2 - target[0], y0 + bh / 2 - target[1]), x0, y0)
-             for y0 in range(edge, h - bh - edge + 1, max(4, h // 40))
-             for x0 in range(edge, w - bw - edge + 1, max(4, w // 60))]
+             for y0 in range(y_lo, y_hi + 1, max(4, h // 40))
+             for x0 in range(x_lo, x_hi + 1, max(4, w // 60))]
     for _, x0, y0 in sorted(spots):
         if any(_hits((x0, y0, bw, bh), o, gap) for o in obstacles):
             continue
@@ -115,7 +119,7 @@ def find_spot(size: Tuple[int, int], box: Tuple[int, int], target: Point, obstac
 
 def draw_sfx(image: Image.Image, text: str, near: Optional[Point], obstacles: List[Rect], rtl: bool = False,
              type_height: Optional[int] = None, ink: Optional[Image.Image] = None,
-             font_path: Optional[str] = None) -> Tuple[Optional[Rect], Optional[str]]:
+             font_path: Optional[str] = None, safe: Optional[Bounds] = None) -> Tuple[Optional[Rect], Optional[str]]:
     """Draw a sound effect on the panel in place; returns (its box, None) or (None, why it was left out).
 
     Args:
@@ -128,6 +132,8 @@ def draw_sfx(image: Image.Image, text: str, near: Optional[Point], obstacles: Li
         type_height: Panel height the type is sized for (default: the image's own height)
         ink: lettering_ink mask of pixels to stay a gap away from
         font_path: Lettering font used when Rubik Black lacks a glyph
+        safe: (left, top, right, bottom) in the panel's px the whole effect stays inside (the print-safe box);
+            with no free spot inside it the effect is left out ("no_space"), never drawn outside it
 
     Reasons: "empty", "too_long" (over MAX_CHARS), "too_big" (over the size cap even at the dialogue size),
     "no_space" (no free spot at any size).
@@ -146,7 +152,7 @@ def draw_sfx(image: Image.Image, text: str, near: Optional[Point], obstacles: Li
         if layer.width > w * MAX_WIDTH or layer.height > h * MAX_HEIGHT:
             continue
         reason = "no_space"
-        spot = find_spot((w, h), layer.size, _target(near, (w, h), layer.size, rtl, edge), obstacles, ink)
+        spot = find_spot((w, h), layer.size, _target(near, (w, h), layer.size, rtl, edge), obstacles, ink, safe)
         if spot:
             image.paste(layer, spot, layer)
             return (spot[0], spot[1], layer.width, layer.height), None
