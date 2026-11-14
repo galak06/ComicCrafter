@@ -28,6 +28,7 @@ _FIXES = {
     "seam": "one continuous picture: the dividing line is gone and the scene runs unbroken across it",
     "identity_mismatch": "the face, age, hair and proportions match the reference photo and character sheet",
     "design_mismatch": "the outfit and prop construction match the character sheet exactly",
+    "head_missing": "the main character's whole head and face are inside the picture, on the shoulders, drawn as the references show",
 }
 _CHARACTER_FIXES = ("identity_mismatch", "design_mismatch")
 

@@ -6,6 +6,11 @@ passed the art check with cream margins). The prompt forbids it (SINGLE_IMAGE_RU
 
 A margin is a run of near-uniform rows or columns from an edge. Only margins on two opposite sides count (a
 print on paper), so one flat sky or floor along one edge is scenery, never cut.
+
+A margin also ends at the picture's edge: a straight line along which the tone changes at once. A close-up against a
+pale, flat wall has the same plain light runs on both sides, but they end where the hero's hair or shoulder begins,
+a few pixels of the line at first; it was read as a print on paper and rejected with MARGIN_CORRECTION (or cropped
+tighter). Such runs are scenery.
 """
 
 import re
@@ -18,6 +23,8 @@ FLAT = 7.0            # luminance standard deviation of a plain line (paper grai
 SAME = 18.0           # a margin line's mean may differ this much from the edge line's mean
 ASPECT_TOLERANCE = 0.15
 PAPER_TONE = 165.0    # paper is light (cream, white, light grey); dark edges are scenery (a tunnel, night)
+EDGE_SHARE = 0.5      # a picture's edge: at least this share of the line just past the margin differs from the margin
+EDGE_LINES = 3        # looked for this many lines past the margin (the quarter-size scan blurs an edge over a line)
 
 
 def _line(gray: Image.Image, axis: str, i: int) -> Tuple[float, float]:
@@ -40,6 +47,24 @@ def _run(gray: Image.Image, axis: str, from_end: bool) -> Tuple[int, Optional[fl
     return count, edge
 
 
+def _hard_edge(gray: Image.Image, axis: str, from_end: bool, run: int) -> bool:
+    """Whether the run of plain lines ends at a straight edge: along most of a line just past it, the tone differs
+    from the run's own tone near its end (one line back from the last, which the quarter-size scan may have blurred
+    into the picture). A wall ends at a silhouette (a small part of the line) or fades (a small difference)."""
+    length = gray.width if axis == "x" else gray.height
+    index = (lambda n: length - 1 - n) if from_end else (lambda n: n)
+    if run < 1 or run >= length:
+        return False
+    tone = _line(gray, axis, index(max(0, run - 2)))[0]
+    for step in range(run, min(run + EDGE_LINES, length)):
+        i = index(step)
+        histogram = gray.crop((i, 0, i + 1, gray.height) if axis == "x" else (0, i, gray.width, i + 1)).histogram()
+        changed = sum(count for value, count in enumerate(histogram) if abs(value - tone) > SAME)
+        if changed >= EDGE_SHARE * sum(histogram):
+            return True
+    return False
+
+
 def find_margins(art: Image.Image) -> Optional[Tuple[int, int, int, int]]:
     """The picture's box (left, top, right, bottom) inside paper margins, or None when there are none."""
     gray = art.convert("L").resize((max(1, art.width // 4), max(1, art.height // 4)))
@@ -50,6 +75,9 @@ def find_margins(art: Image.Image) -> Optional[Tuple[int, int, int, int]]:
     same = lambda a, b: a is not None and b is not None and abs(a - b) <= SAME and min(a, b) >= PAPER_TONE
     sides = min(left, right) >= MIN_SHARE * gray.width and same(left_tone, right_tone)
     ends = min(top, bottom) >= MIN_SHARE * gray.height and same(top_tone, bottom_tone)
+    # Both margins of a print end at the picture's straight edge; a pale wall behind a close-up does not.
+    sides = sides and _hard_edge(gray, "x", False, left) and _hard_edge(gray, "x", True, right)
+    ends = ends and _hard_edge(gray, "y", False, top) and _hard_edge(gray, "y", True, bottom)
     if not sides and not ends:
         return None
     if left + right >= gray.width or top + bottom >= gray.height:

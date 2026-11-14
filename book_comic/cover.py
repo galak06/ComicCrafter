@@ -7,7 +7,8 @@ explicit art defects get at most one more image call, and failed inspection bloc
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Sequence
+from dataclasses import replace
+from typing import Dict, Optional, Sequence, Union
 
 from PIL import Image, ImageOps
 
@@ -16,22 +17,27 @@ from book_comic.comic_rules import cover_scene
 from book_comic.margins import trim_margins
 from book_comic.seam import find_seam
 from book_comic.art_check import ArtCheckError, inspect_art, request_art, require_checked
-from book_comic.cover_lettering import CoverFonts, letter_cover
+from book_comic.cover_badge import CoverBadge, as_badge
+from book_comic.cover_lettering import CoverFonts, letter_cover, top_title_shrink
 from book_comic.image_prompts import cover_prompt, cover_requirements
 from book_comic.rejected_art import report as report_rejected
 from book_comic.revise import data_url, revision_prompt
-from book_comic.render import image_url
+from book_comic.render import RTL_LANGUAGES, image_url
 from generation.openrouter_image_client import OpenRouterImageClient, closest_aspect_ratio
 from generation.vision_client import VisionClient
 
 logger = logging.getLogger(__name__)
 
-# The one-line title and the starring line end near 14% of the height; a head starting above 20%
-# would crowd them (measured on real covers: 0.16 crowds, 0.19-0.24 leaves clear space).
-HEAD_TOP_MIN = 0.2
+# The title stays at the top whenever the head starts at least this share of the height (one lettering gap) below
+# the top title block, measured for the cover's own title and faces (cover_lettering.top_block_end: 13.1% and 15.4%
+# of the height on the two real covers of 2026-11-13). A fixed limit of 20% had moved both titles onto the hero's
+# legs, with empty setting above heads at 17.6% and 19.1%. A block that misses by a little is not moved either: its
+# title is drawn smaller (cover_lettering.top_title_shrink, down to MIN_TITLE_SHRINK) until the gap is there.
+HEAD_GAP = 0.02
 # A head above 8.5% of the height prints in the printers' top margin (12.7 mm inside the trim): BookPod's B5 cuts
 # 7.8 mm of the 256.8 mm art above the trim (20.8 mm, 8.1%), Lulu's comic 3.2 mm of 266.7 mm (6.1%). Such a draw is
-# drawn again while draws remain; it is never a reason to lose the cover (the last such draw is kept).
+# drawn again while draws remain; it is never a reason to lose the cover: when no later draw is accepted, whatever
+# went wrong with them (a headless revision, a defect, a check that did not answer), the sound draw is kept.
 HEAD_SAFE_MIN = 0.085
 HEADROOM_FIX = ("the camera is pulled back a little so the main character sits lower in the frame, with a clear stretch "
                 "of the setting (its sky, ceiling or upper wall), at least one eighth of the canvas height, above the top of the hair or hat")
@@ -44,6 +50,17 @@ def _skipped(audit, draw: int, reason: str) -> None:
     """A cover draw thrown away before the vision check is recorded, so a failed cover shows why it had fewer checks."""
     if audit is not None:
         audit.append({"accepted": False, "kind": "cover", "draw": draw, "skipped": reason, "requirements": [], "checks": {}})
+
+
+def _high_heads(rejected) -> list:
+    """Indexes of the draws set aside only because the head would print in the top margin: checked, sound art."""
+    return [i for i, (_, _, report) in enumerate(rejected) if report.get("head_in_margin")]
+
+
+def title_goes_bottom(head: float, size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None) -> bool:
+    """Whether the head (its top, as a share of the height) would touch the top title block of this cover, even with
+    the title at its smallest (cover_lettering.top_title_shrink)."""
+    return top_title_shrink(head, size, cover, fonts, HEAD_GAP) is None
 
 
 def panel_strip(arts: Sequence[Image.Image], height: int = 512, gap: int = 16) -> Optional[Image.Image]:
@@ -72,12 +89,14 @@ def render_cover(
     fonts: Optional[CoverFonts] = None,
     dpi: Optional[int] = None,
     requirements=(), prop_anchors=None, audit=None, on_reject=None, art_path: Optional[Path] = None,
+    badge: Optional[Union[CoverBadge, Dict]] = None,
 ) -> Path:
     """Draw and letter the cover; at most ATTEMPTS image calls.
 
     Remove a seam locally, then accept only inspected art with matching identity, designs and scene.
-    Unchecked or persistently rejected art raises. A high head moves lettering instead of causing a redraw;
-    only a head in the printers' top margin (HEAD_SAFE_MIN) is drawn again, and never fails the cover.
+    Unchecked or persistently rejected art raises. A head that would touch the top title block moves the lettering to the bottom instead of causing a redraw;
+    only a head in the printers' top margin (HEAD_SAFE_MIN) is drawn again, and never fails the cover: sound art
+    with a high head is kept when no later draw is accepted. A draw without a measurable head is a rejected draw.
 
     Args:
         cast: Character sheet (style, characters, optional props)
@@ -93,6 +112,11 @@ def render_cover(
         dpi: DPI tag for the saved PNG
         on_reject: Optional hook that sees each inspected, rejected draw (see art_check.draw_checked)
         art_path: Where to also save the chosen art unlettered (the back cover's style reference)
+        badge: Optional picture (a brand mark) drawn on the lettered cover only, never on art_path:
+            cover_badge.CoverBadge(path, width=0.14, position="bottom", rtl=None) or the same fields as a dict.
+            It goes in a print-safe corner clear of the lettering and, as far as the measured head and the art
+            itself tell, of the figure (cover_badge.place_badge), or nowhere; it never changes a draw, the
+            lettering or the outcome. None (the default) saves exactly the cover drawn without this argument
     """
     # A cover keeps its own framing: the prompt strips the scene's shot and limb-only clauses (image_prompts.cover_prompt);
     # the check uses the same scene and the same requirements, without framing.
@@ -128,18 +152,24 @@ def render_cover(
                             props=cast.get("props", []), anchors=prop_anchors)
         if unasked_gloves(found, prompt):
             found = {**found, "gloves": True}
+        if found["head_top"] is None and type(found.get("has_text")) is bool:
+            # The check answered and found no head to measure: a hero cover without its hero's head (2026-11-13: a
+            # headroom revision drew the body alone). A defect of that draw, not a check that never ran.
+            found = {**found, "head_missing": True}
         report = {"accepted": None, "requirements": requirements, "checks": found, "kind": "cover", **({"revised": True} if revised else {})}
         if audit is not None:
             audit.append(report)
         try:
-            clean = require_checked(found, require_head=True)
+            clean = require_checked(found)
         except ArtCheckError:
             report_rejected(on_reject, draw, art, found, True, prompt, requirements)
-            raise
+            if not _high_heads(rejected):
+                raise
+            report["accepted"] = False  # unchecked art is never published, and the sound draw in hand is not thrown away for it
+            continue
         in_margin = clean and found["head_top"] < HEAD_SAFE_MIN
         report["accepted"] = clean and not in_margin
         if clean and not in_margin:
-            head = found["head_top"]
             break  # a high head is handled by local title placement, without another image call
         if in_margin:  # sound art whose head would print in the top margin: not a vision rejection, so not reported as one
             report["head_in_margin"] = True
@@ -147,18 +177,29 @@ def render_cover(
             report_rejected(on_reject, draw, art, found, False, prompt, requirements)
         rejected.append((art, found, report))
     else:
-        best = pick_fallback([(a, f) for a, f, _ in rejected], requirements)
+        # Sound art with a high head is better than any draw with a defect, and far better than no cover: the one
+        # whose head is lowest is kept (the lettering moves the title off it). Otherwise the least-bad draw.
+        high = _high_heads(rejected)
+        best = max(high, key=lambda i: (rejected[i][1]["head_top"], i)) if high else pick_fallback([(a, f) for a, f, _ in rejected], requirements)
         if best is None:
             raise ArtCheckError("comic_cover_rejected")
         art, found, report = rejected[best]
         report["fallback"] = True
-        head = found["head_top"]
-        logger.warning(f"Cover: every draw was rejected; keeping the least-bad one (draw {best + 1})")
+        logger.warning(f"Cover: no draw was accepted; keeping {'the sound one with the lowest head' if high else 'the least-bad one'} (draw {best + 1})")
+    head = found["head_top"]
 
     dpi_tag = {"dpi": (dpi, dpi)} if dpi else {}
     if art_path is not None:
         art.save(art_path, format="PNG")
-    # Move the title instead of drawing again when the accepted head is in the title block.
-    letter_cover(art, cover, fonts, title_at_bottom=head < HEAD_TOP_MIN).save(path, format="PNG", optimize=True, **dpi_tag)
+    # Move the title instead of drawing again, and only when the accepted head would be in this title's block even
+    # with the title at its smallest; a block that nearly fits keeps the top with a smaller title.
+    badge, language = as_badge(badge), (cast.get("language") or "").lower()
+    if badge and badge.rtl is None and language:  # the comic's language decides the corner, as it decides page lettering
+        badge = replace(badge, rtl=language in RTL_LANGUAGES)
+    extra = {"badge": badge, "head_top": head} if badge else {}  # the badge keeps off the figure: above the measured head
+    shrink = top_title_shrink(head, art.size, cover, fonts, HEAD_GAP)
+    if shrink is not None and shrink < 1:
+        extra["title_shrink"] = shrink
+    letter_cover(art, cover, fonts, title_at_bottom=shrink is None, **extra).save(path, format="PNG", optimize=True, **dpi_tag)
     logger.info(f"Saved cover {path}")
     return path

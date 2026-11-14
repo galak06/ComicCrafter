@@ -120,3 +120,9 @@ def marks_only_row(observed: object, subject: object = "") -> bool:
     text = str(observed or "")
     return bool(_MARKS_FIRST.search(text) and _HELD_SURFACE.search(f"{subject or ''} {text}")
                 and not _OFF_PROP.search(text) and not _CHANGED.search(text) and not _real_word(text))
+
+
+# Said to the checker when a panel was drawn with a palette reference (RenderOptions.style_ref): the brief names it
+# as its last reference, but it is not sent to the check, so a cover's hero, setting or props are never compared.
+PALETTE_NOTE = ("The brief's last reference image, the palette reference, is deliberately not attached: it only set colours "
+                "and rendering style. Do not judge identity, design, scene or props against it, and do not flag its absence. ")

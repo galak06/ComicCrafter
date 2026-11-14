@@ -23,7 +23,15 @@ REFERENCE_ROLES = {
     "previous": "the previous panel of this page",
     "panels": "the first page's panels side by side",
     "style": "the comic's front cover, for drawing style, palette, lighting and world only",
+    "palette": ("a palette and rendering-style reference only: match its colours, line work, lighting and texture, "
+                "and never copy its composition, figures, poses, setting or objects"),
 }
+# The references that are earlier pictures of the story itself (a palette reference is not one)
+STORY_ROLES = ("previous", "panels")
+EARLIER_PICTURES = (
+    "The earlier pictures of this story establish the environment and latest prop state unless the current scene explicitly changes them; "
+    "they do not control camera framing. "
+)
 
 PANEL_CRAFT = (
     "Use the scene's emotion: show it through the face when visible, otherwise through gesture or posture. "
@@ -53,6 +61,9 @@ def describe_references(roles: Sequence[str]) -> str:
     """One sentence naming each attached reference image in order ("" when there are none)."""
     if not roles:
         return ""
+    # A palette reference must not be read as an earlier picture of the story: with one attached, the sentence about
+    # earlier pictures is said only when a real one (STORY_ROLES) is attached too. Without one it is always said, as before.
+    earlier = "" if "palette" in roles and not any(role in STORY_ROLES for role in roles) else EARLIER_PICTURES
     named = "; ".join(f"reference image {i} is {REFERENCE_ROLES[role]}" for i, role in enumerate(roles, 1))
     return (
         f"Attached references: {named}. "
@@ -60,8 +71,7 @@ def describe_references(roles: Sequence[str]) -> str:
         "age cues, head-to-body proportions, hair, facial hair and exact garment construction. "
         "The specified age group controls depicted age; explicit appearance details override photo hair or accessories. "
         "Use the photo for unspecified details and retain recognizable facial identity within that age group. "
-        "The earlier pictures of this story establish the environment and latest prop state unless the current scene explicitly changes them; "
-        "they do not control camera framing. "
+        f"{earlier}"
         "The current scene controls pose, expression, shot distance and camera angle; do not copy a prior composition. "
         "Keep recurring companions and objects recognizable by their fixed geometry and construction. "
     )
