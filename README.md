@@ -239,7 +239,10 @@ Queue a job from Python with `generate_book_comic.delay("book.pdf", first_chapte
   art under it is calmer by a quarter or more (`cover_badge.busyness`: the spread of colours after a blur
   of an eighth of the badge width, so line work does not count and a boot or a limb does). The corners are inside the lettering's print-safe box (11% in
   from each side, ending at `SAFE_BOTTOM`, a top badge starting 8.5% down). Reading direction comes from
-  `cast["language"]`, else the cover's text, unless `rtl` is set. The badge never moves or resizes
+  `cast["language"]`, else the cover's text, unless `rtl` is set. With a measured head the badge is drawn smaller (down to 75% of
+  its size, never narrower than 6% of the cover) when that fits it in a top corner above the head; failing that, a
+  free corner is used only over calm art (`cover_badge.roughness` up to `ROUGH_LIMIT`), and otherwise there is no
+  badge: none is better than one on the figure or the main prop. The badge never moves or resizes
   lettering, is not drawn on `art_path`, and never fails a cover: with no free corner, or a missing or
   unreadable file, the cover is saved without it. Without `badge` the cover is pixel for pixel the same.
 - **Full-page splash**: `PageRenderer.render_page` takes 3 panels (a vertical strip) or 1 panel (a

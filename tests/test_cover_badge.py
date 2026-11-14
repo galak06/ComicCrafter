@@ -223,7 +223,8 @@ def test_a_head_measured_below_the_top_corners_sends_the_badge_above_the_figure(
     assert placed(scene(), mark=mark(), head_top=0.3) == ("top", "right")
     wide = mark((543, 376))  # the real badge's shape: its top corners end 14.9% down, above the real head at 17.6%
     assert placed(scene(), HEBREW | {"title": "מרדף בהרים"}, mark=wide, head_top=0.176) == ("top", "left")  # reading end
-    assert placed(scene(), HEBREW | {"title": "מרדף בהרים"}, mark=wide, head_top=0.14) == ("bottom", "left")  # the head reaches them
+    assert placed(scene(), HEBREW | {"title": "מרדף בהרים"}, mark=wide, head_top=0.14) == ("top", "left")  # a little smaller, still above it
+    assert placed(scene(), HEBREW | {"title": "מרדף בהרים"}, mark=wide, head_top=0.125) == ("bottom", "left")  # the head reaches them
     assert placed(scene("top-end"), mark=mark(), head_top=0.3) == ("top", "left")  # a raised prop in one top corner
     assert placed(scene("top-end", "top-start"), mark=mark(), head_top=0.3) == ("top", "right")  # still above the figure
     # A head that reaches the top corners' rows says nothing about them: the calmest corner, in the usual order.

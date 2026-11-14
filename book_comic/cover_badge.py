@@ -6,6 +6,9 @@ when no corner is free, or the file cannot be read, the cover is lettered withou
 Among the corners clear of the lettering it keeps off the figure with what is already known, without a vision call:
 the measured top of the head (the rows above it hold no body) and the unlettered art itself (a corner lying across a
 large shape, such as a boot or a limb, loses to a calm one). Real covers 2026-11-13: the badge sat on the hero's boot.
+With a measured head the badge is drawn a little smaller when that is what fits it beside the title above the head,
+and a corner that is not above the head is used only over calm art: no badge is better than one on the figure or
+the main prop (real cover 2026-11-14: 43 px short of the top corner, it was drawn on the robot).
 """
 
 import logging
@@ -34,6 +37,14 @@ POSITIONS = ("bottom", "top")
 BLUR = 1 / 8
 # A later corner replaces an earlier one only when it is calmer by a quarter and more: near-equal corners keep the order.
 CALMER = 0.75
+# With a measured head, the badge is drawn at the largest of these shares of its size that fits a top corner above it.
+SHRINKS = tuple(round(1 - i * 0.025, 3) for i in range(11))  # 1.0 down to 0.75
+# With a measured head, a corner that is not above it is used only when the art under it is no rougher than this
+# (roughness). Fitted on the eight bottom corners of the four real covers of 2026-11-13 and 2026-11-14 at print size:
+# a far building 99, a ledge with a rope's hook 99, other ledges and rock 54 to 83; a robot's arm and wheel 124, a boot 153.
+# The margin is thin (moving a corner 30 px gives 106 for the building and 110 for the robot), and busyness itself
+# could not tell them apart (ledge 19.1, robot 19.0): this limit is a last resort after the top corners.
+ROUGH_LIMIT = 112
 
 
 @dataclass
@@ -63,6 +74,11 @@ def as_badge(badge) -> Optional[CoverBadge]:
         known = {key: badge[key] for key in ("path", "width", "position", "rtl") if key in badge}
         return CoverBadge(**known)
     return None
+
+
+def _resized(picture: Image.Image, shrink: float) -> Image.Image:
+    size = (max(1, round(picture.width * shrink)), max(1, round(picture.height * shrink)))
+    return picture if shrink == 1 else picture.resize(size, Image.Resampling.LANCZOS)
 
 
 def _load(badge: CoverBadge, cover_size: Tuple[int, int]) -> Optional[Image.Image]:
@@ -115,6 +131,18 @@ def busyness(art: Image.Image, box: Box) -> float:
     return sum(ImageStat.Stat(blurred.crop((left - area[0], top - area[1], right - area[0], bottom - area[1]))).stddev) / 3
 
 
+def roughness(art: Image.Image, box: Box) -> float:
+    """The largest colour step inside `box` between shapes a sixteenth of its width and larger: the range of each
+    channel after that blur, averaged (0 for a flat colour, 255 for black beside white)."""
+    left, top, right, bottom = box
+    sigma = max(1, round((right - left) / 16))
+    pad = 3 * sigma
+    area = (max(0, left - pad), max(0, top - pad), min(art.width, right + pad), min(art.height, bottom + pad))
+    blurred = art.crop(area).convert("RGB").filter(ImageFilter.GaussianBlur(sigma))
+    extrema = ImageStat.Stat(blurred.crop((left - area[0], top - area[1], right - area[0], bottom - area[1]))).extrema
+    return sum(high - low for low, high in extrema) / 3
+
+
 def _calmest(art: Image.Image, boxes: Sequence[Box]) -> Box:
     """The first box, unless a later one is calmer by CALMER (and by more than rounding noise on flat art)."""
     best, least = boxes[0], busyness(art, boxes[0])
@@ -135,22 +163,42 @@ def place_badge(page: Image.Image, badge, lettering: Sequence[Box], rtl: bool, s
     a later free corner is taken instead when the art under it is calmer by a quarter or more (busyness, CALMER).
     head_top: the top of the hero's head as a share of the height, when it was measured. Free top corners that end
     above it lie over setting, not over the figure, so they are the only ones considered (the calmer of them):
-    the bottom band of a hero cover holds the legs and feet, and a dark boot on dark rock looks calm.
+    the bottom band of a hero cover holds the legs and feet, and a dark boot on dark rock looks calm. When the badge
+    fits no such corner at its size, it is drawn smaller (SHRINKS, never narrower than WIDTH_RANGE allows) if that
+    fits one. Failing that, a free corner is used at full size only over art no rougher than ROUGH_LIMIT, and
+    with none there is no badge. Without head_top nothing is shrunk and no corner is refused for its art.
     """
     badge = as_badge(badge)
     picture = _load(badge, page.size) if badge else None
     if picture is None:
         return None
     direction = badge.rtl if isinstance(badge.rtl, bool) else rtl
-    gap = page.height // 50
-    free = [box for box in badge_boxes(picture.size, page.size, badge.position, direction, safe_bottom, safe_width)
-            if box[0] >= 0 and box[1] >= 0 and _clear(box, lettering, gap)]
-    if not free:
-        logger.info("Cover badge not drawn: no corner is clear of the lettering")
-        return None
-    if isinstance(head_top, (int, float)) and math.isfinite(head_top):
-        top_y = math.ceil(page.height * TOP_SAFE)
-        free = [box for box in free if box[1] == top_y and box[3] <= head_top * page.height] or free
-    box = _calmest(art, free) if art is not None and art.size == page.size else free[0]
+    gap, top_y = page.height // 50, math.ceil(page.height * TOP_SAFE)
+    art = art if art is not None and art.size == page.size else None
+    measured = isinstance(head_top, (int, float)) and math.isfinite(head_top)
+
+    def free_corners(size):
+        return [box for box in badge_boxes(size, page.size, badge.position, direction, safe_bottom, safe_width)
+                if box[0] >= 0 and box[1] >= 0 and _clear(box, lettering, gap)]
+
+    free, full = [], picture
+    for shrink in SHRINKS if measured else ():
+        if shrink < 1 and full.width * shrink < WIDTH_RANGE[0] * page.width:
+            break
+        picture = _resized(full, shrink)
+        free = [box for box in free_corners(picture.size) if box[1] == top_y and box[3] <= head_top * page.height]
+        if free:
+            break
+    if not free:  # no corner above the head, or no head to go by: the full badge in a free corner
+        picture, free = full, free_corners(full.size)
+        if not free:
+            logger.info("Cover badge not drawn: no corner is clear of the lettering")
+            return None
+        if measured and art is not None:
+            free = [box for box in free if roughness(art, box) <= ROUGH_LIMIT]
+            if not free:
+                logger.info("Cover badge not drawn: every free corner lies over a shape, none above the head")
+                return None
+    box = _calmest(art, free) if art is not None else free[0]
     page.alpha_composite(picture, (box[0], box[1]))
     return box
