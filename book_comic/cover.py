@@ -18,7 +18,7 @@ from book_comic.margins import trim_margins
 from book_comic.seam import find_seam
 from book_comic.art_check import ArtCheckError, inspect_art, request_art, require_checked
 from book_comic.cover_badge import CoverBadge, as_badge
-from book_comic.cover_lettering import CoverFonts, letter_cover, top_block_end
+from book_comic.cover_lettering import CoverFonts, letter_cover, top_title_shrink
 from book_comic.image_prompts import cover_prompt, cover_requirements
 from book_comic.rejected_art import report as report_rejected
 from book_comic.revise import data_url, revision_prompt
@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 # The title stays at the top whenever the head starts at least this share of the height (one lettering gap) below
 # the top title block, measured for the cover's own title and faces (cover_lettering.top_block_end: 13.1% and 15.4%
 # of the height on the two real covers of 2026-11-13). A fixed limit of 20% had moved both titles onto the hero's
-# legs, with empty setting above heads at 17.6% and 19.1%.
+# legs, with empty setting above heads at 17.6% and 19.1%. A block that misses by a little is not moved either: its
+# title is drawn smaller (cover_lettering.top_title_shrink, down to MIN_TITLE_SHRINK) until the gap is there.
 HEAD_GAP = 0.02
 # A head above 8.5% of the height prints in the printers' top margin (12.7 mm inside the trim): BookPod's B5 cuts
 # 7.8 mm of the 256.8 mm art above the trim (20.8 mm, 8.1%), Lulu's comic 3.2 mm of 266.7 mm (6.1%). Such a draw is
@@ -57,8 +58,9 @@ def _high_heads(rejected) -> list:
 
 
 def title_goes_bottom(head: float, size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None) -> bool:
-    """Whether the head (its top, as a share of the height) would touch the top title block of this cover."""
-    return head < top_block_end(size, cover, fonts) + HEAD_GAP
+    """Whether the head (its top, as a share of the height) would touch the top title block of this cover, even with
+    the title at its smallest (cover_lettering.top_title_shrink)."""
+    return top_title_shrink(head, size, cover, fonts, HEAD_GAP) is None
 
 
 def panel_strip(arts: Sequence[Image.Image], height: int = 512, gap: int = 16) -> Optional[Image.Image]:
@@ -189,11 +191,15 @@ def render_cover(
     dpi_tag = {"dpi": (dpi, dpi)} if dpi else {}
     if art_path is not None:
         art.save(art_path, format="PNG")
-    # Move the title instead of drawing again, and only when the accepted head would be in this title's block.
+    # Move the title instead of drawing again, and only when the accepted head would be in this title's block even
+    # with the title at its smallest; a block that nearly fits keeps the top with a smaller title.
     badge, language = as_badge(badge), (cast.get("language") or "").lower()
     if badge and badge.rtl is None and language:  # the comic's language decides the corner, as it decides page lettering
         badge = replace(badge, rtl=language in RTL_LANGUAGES)
     extra = {"badge": badge, "head_top": head} if badge else {}  # the badge keeps off the figure: above the measured head
-    letter_cover(art, cover, fonts, title_at_bottom=title_goes_bottom(head, art.size, cover, fonts), **extra).save(path, format="PNG", optimize=True, **dpi_tag)
+    shrink = top_title_shrink(head, art.size, cover, fonts, HEAD_GAP)
+    if shrink is not None and shrink < 1:
+        extra["title_shrink"] = shrink
+    letter_cover(art, cover, fonts, title_at_bottom=shrink is None, **extra).save(path, format="PNG", optimize=True, **dpi_tag)
     logger.info(f"Saved cover {path}")
     return path

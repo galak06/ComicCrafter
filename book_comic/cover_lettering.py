@@ -22,6 +22,11 @@ FOOTER_FONT = FONTS_DIR / "Assistant-Regular.ttf"
 SAFE_BOTTOM = 0.11  # lettering ends 11% above the art's bottom: 14.2 mm inside BookPod's trim, 26.2 mm inside Lulu's
 SAFE_TOP = 0.064  # the title starts 6.4% below the art's top: 13.9 mm inside Lulu's trim, 8.6 mm inside BookPod's (its own text line is 5 mm)
 SAFE_WIDTH = 0.78  # lettering is centred on 78% of the width: 14.4 mm inside Lulu's side trims, 15.3 mm inside BookPod's
+# The smallest a title is drawn, as a share of its own size, to stay at the top above the head (top_title_shrink).
+# Real cover 2026-11-14: Amatic SC at 1.6 (a 6.1% tall title, Rubik's is 4.6%) ended 16.9% down, 0.9% above a head at
+# 17.8%; the whole block went onto the hero's shin and the robot. At 0.8 of its size it clears the head by the gap.
+MIN_TITLE_SHRINK = 0.75
+SHRINK_STEP = 0.025
 
 
 @dataclass
@@ -107,24 +112,27 @@ def _shadowed_text(page: Image.Image, text: str, font, max_width: int, y: int, a
     return th
 
 
-def _faces(cover: Dict, fonts: CoverFonts, size: tuple) -> tuple:
-    """(title face, starring face) at their drawn sizes for a cover of `size`; None for a line the cover lacks."""
+def _faces(cover: Dict, fonts: CoverFonts, size: tuple, title_shrink: float = 1.0) -> tuple:
+    """(title face, starring face) at their drawn sizes for a cover of `size`; None for a line the cover lacks.
+    title_shrink (below 1) scales the title's drawn size, after it was fitted to one line."""
     w, h = size
     title, title_font = cover.get("title", ""), None
     if title:
         path = resolve_font(cover.get("title_font"), fonts.title)
         title_font = one_line_font(path, title, int(w * cover_title_scale(title) * fonts.title_scale), int(w * SAFE_WIDTH))
+        if title_shrink < 1:
+            title_font = ImageFont.truetype(str(path), max(12, int(title_font.size * title_shrink)))
     starring_font = ImageFont.truetype(str(fonts.starring), max(18, int(h * 0.026))) if cover.get("starring") else None
     return title_font, starring_font
 
 
-def top_block_end(size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None) -> float:
+def top_block_end(size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None, title_shrink: float = 1.0) -> float:
     """Where the top title block ends, as a share of the cover height: the title at SAFE_TOP and the starring line
     one gap below it, measured for this title, these faces and this cover size exactly as letter_cover draws them
-    (SAFE_TOP itself for a cover with neither line). render_cover keeps the title at the top when the head starts
-    below it."""
+    (SAFE_TOP itself for a cover with neither line), with the title at title_shrink of its size. render_cover keeps
+    the title at the top when the head starts below it."""
     w, h = size
-    title_font, starring_font = _faces(cover, fonts or CoverFonts(), size)
+    title_font, starring_font = _faces(cover, fonts or CoverFonts(), size, title_shrink)
     draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
     height = lambda text, font, width: (lambda box: box[3] - box[1])(_block(draw, text, font, width)[2])
     end = int(h * SAFE_TOP) + (height(cover["title"], title_font, w) if title_font else 0)
@@ -133,8 +141,20 @@ def top_block_end(size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None) 
     return end / h
 
 
+def top_title_shrink(head: float, size: tuple, cover: Dict, fonts: Optional[CoverFonts] = None, gap: float = 0.0) -> Optional[float]:
+    """The title size (a share of its own, 1.0 when it fits as it is) at which the top block ends `gap` of the height
+    or more above the head (its top, a share of the height). The largest step down to MIN_TITLE_SHRINK that fits;
+    None when even the smallest does not, and the block belongs at the bottom."""
+    steps = int(round((1 - MIN_TITLE_SHRINK) / SHRINK_STEP)) if cover.get("title") else 0
+    for shrink in (round(1 - i * SHRINK_STEP, 3) for i in range(steps + 1)):
+        if head >= top_block_end(size, cover, fonts, shrink) + gap:
+            return shrink
+    return None
+
+
 def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = None, title_at_bottom: bool = False,
-                 badge: Optional[Union[CoverBadge, Dict]] = None, head_top: Optional[float] = None) -> Image.Image:
+                 badge: Optional[Union[CoverBadge, Dict]] = None, head_top: Optional[float] = None,
+                 title_shrink: float = 1.0) -> Image.Image:
     """Letter the cover art.
 
     Args:
@@ -149,6 +169,8 @@ def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = 
             file there is no badge. None (the default) letters the cover exactly as without this argument
         head_top: The top of the hero's head as a share of the height, when measured. Only the badge uses it:
             a free top corner above the head is preferred to the bottom band, where the figure stands
+        title_shrink: The title's size as a share of its own (top_title_shrink), so a tall title still ends above
+            the head; 1.0 (the default) letters the cover exactly as without this argument
 
     Every line stays inside SAFE_TOP, SAFE_BOTTOM and SAFE_WIDTH, so none is printed in a printer's margin.
     """
@@ -164,7 +186,7 @@ def letter_cover(image: Image.Image, cover: Dict, fonts: Optional[CoverFonts] = 
         fh = _shadowed_text(page, cover["footer"], font, text_width, bottom, align_bottom=True, blur=max(3, h // 400), boxes=boxes)
         bottom -= fh + gap
     title = cover.get("title", "")
-    title_font, starring_font = _faces(cover, fonts, page.size)
+    title_font, starring_font = _faces(cover, fonts, page.size, title_shrink)
     if title_at_bottom:  # starring right above the footer, the title above it, both in the bottom shade
         if starring_font:
             bottom -= _shadowed_text(page, cover["starring"], starring_font, text_width, bottom, align_bottom=True, blur=max(3, h // 400), boxes=boxes) + gap

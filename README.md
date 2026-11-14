@@ -214,7 +214,9 @@ Queue a job from Python with `generate_book_comic.delay("book.pdf", first_chapte
   strip. A seam (a second strip stacked on top) is detected and cropped off. The title and starring line
   stay at the top whenever the head starts at least 2% of the height below that block, measured for the
   cover's own title and faces (`cover_lettering.top_block_end`: about 13% to 16% of the height, so heads
-  from about 15% to 18% down keep a top title); only a head that would touch the block gets its title
+  from about 15% to 18% down keep a top title). A block that misses that gap by a little keeps the top
+  with a smaller title (`cover_lettering.top_title_shrink`, down to 75% of its size: a tall face such as
+  Amatic SC makes a taller block); only a head that would touch even that block gets its title
   block at the bottom instead. A head in the printers' top margin
   (above 8.5% of the height) is drawn again, and that rule never loses a cover: when no later draw is
   accepted (a revision that came back worse, a defect, a check that did not answer), the sound draw whose

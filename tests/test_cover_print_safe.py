@@ -11,7 +11,7 @@ from PIL import Image
 from book_comic import cover as cover_module
 from book_comic.back_cover_lettering import letter_back_cover
 from book_comic.cover import HEAD_GAP, HEAD_SAFE_MIN, HEADROOM_FIX, render_cover, title_goes_bottom
-from book_comic.cover_lettering import SAFE_TOP, letter_cover, top_block_end
+from book_comic.cover_lettering import MIN_TITLE_SHRINK, SAFE_TOP, letter_cover, top_block_end, top_title_shrink
 from book_comic.revise import REVISE_MARK
 from conftest import FakeImages, FakeVision
 
@@ -145,11 +145,9 @@ def test_the_real_titles_need_thirteen_and_fifteen_percent_of_the_height():
     assert top_block_end((W, H), {"title": "Go"}) < top_block_end((W, H), TITLES["he"])  # no starring line: a shorter block
 
 
-@pytest.mark.parametrize("head, bottom", [(0.10, True), (0.15, True), (0.18, False), (0.25, False)])
+@pytest.mark.parametrize("head, bottom", [(0.10, True), (0.13, True), (0.18, False), (0.25, False)])
 @pytest.mark.parametrize("cover", TITLES)
 def test_the_title_stays_at_the_top_when_the_head_starts_below_its_block(tmp_path, monkeypatch, head, bottom, cover):
-    if (cover, head) == ("hebrew", 0.15):
-        bottom = False  # a 39-character title is set small: its block ends 11.7% down, so even this head clears it
     assert title_goes_bottom(head, (W, H), TITLES[cover]) is bottom
     bottoms = []
     monkeypatch.setattr(cover_module, "letter_cover", lambda art, c, f, title_at_bottom: bottoms.append(title_at_bottom) or art)
@@ -161,7 +159,10 @@ def test_the_title_stays_at_the_top_when_the_head_starts_below_its_block(tmp_pat
 def test_the_title_moves_only_when_the_head_would_touch_its_block():
     for cover in TITLES.values():
         limit = top_block_end((W, H), cover) + HEAD_GAP  # one lettering gap between the starring line and the hair
-        assert title_goes_bottom(limit - 0.001, (W, H), cover) and not title_goes_bottom(limit, (W, H), cover)
+        assert top_title_shrink(limit, (W, H), cover, gap=HEAD_GAP) == 1.0  # the title as it is
+        assert MIN_TITLE_SHRINK <= top_title_shrink(limit - 0.001, (W, H), cover, gap=HEAD_GAP) < 1  # a little smaller, still at the top
+        lowest = top_block_end((W, H), cover, title_shrink=MIN_TITLE_SHRINK) + HEAD_GAP  # the block with the smallest title
+        assert title_goes_bottom(lowest - 0.001, (W, H), cover) and not title_goes_bottom(lowest, (W, H), cover)
     assert round(top_block_end((W, H), TITLES["he"]) + HEAD_GAP, 3) == 0.151  # the Hebrew cover's head, 0.176, clears it
     assert round(top_block_end((W, H), TITLES["en"]) + HEAD_GAP, 3) == 0.174  # the English cover's head, 0.191, clears it
 
