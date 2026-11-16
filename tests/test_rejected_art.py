@@ -1,4 +1,4 @@
-"""Opt-in saving of rejected draws: file names, non-personal JSON, the cap, and no effect on the outcome."""
+"""Opt-in saving of rejected draws: file names, the JSON (reasons without brief text, the brief beside them), the cap, and no effect on the outcome."""
 
 import json
 
@@ -32,8 +32,13 @@ def renderer(images, vision, **options):
     return PageRenderer(CAST, images, vision, SMALL, RenderOptions(check_art=True, **options))
 
 
-def records(directory):
-    return {p.name: json.loads(p.read_text()) for p in sorted(directory.glob("*.json"))}
+BRIEF = ("prompt", "requirements")
+
+
+def records(directory, brief=False):
+    """Each .json by file name; without `brief`, the prompt and requirements are left out (checked on their own)."""
+    rows = {p.name: json.loads(p.read_text()) for p in sorted(directory.glob("*.json"))}
+    return rows if brief else {name: {k: v for k, v in row.items() if k not in BRIEF} for name, row in rows.items()}
 
 
 def test_nothing_is_written_without_a_rejected_dir(tmp_path):
@@ -109,12 +114,26 @@ def test_reasons_keep_only_failed_observations_and_no_brief_text(tmp_path):
     saver = RejectedArtSaver(out, names=["Dana", "דנה"])
     draw_checked(FakeImages(colours("red", "blue")), FakeVision(lambda p, i: next(draws)), SCENE, [], "2:3",
                  requirements=requirements, on_reject=saver.hook("panel", 3))
-    record = records(out)["panel_p3_d1.json"]
+    record = records(out, brief=True)["panel_p3_d1.json"]
     assert record["failed_checks"] == ["scene_mismatch", "requirement_mismatch"]
     assert record["reasons"] == ["the girl stands upright beside a wall", "Draw the figure kneeling on the floor"]
-    text = json.dumps(record, ensure_ascii=False)
+    text = json.dumps(record["reasons"], ensure_ascii=False)
     assert "Dana" not in text and "secret door" not in text and "kneeling\"" not in text
-    assert set(record) == {"stage", "panel", "draw", "failed_checks", "reasons"}
+    assert set(record) == {"stage", "panel", "draw", "failed_checks", "reasons", "prompt", "requirements"}
+    # The brief the draw was checked against is kept beside the reasons, so the rejection can be reproduced.
+    assert SCENE in record["prompt"]
+    assert record["requirements"] == requirements
+
+
+def test_the_brief_is_capped_and_requirement_rows_keep_only_their_three_fields(tmp_path):
+    from book_comic.rejected_art import MAX_REQUIREMENTS, PROMPT_CHARS, REQUIREMENT_CHARS
+    saver = RejectedArtSaver(tmp_path)
+    rows = [{"subject": "x" * 500, "attribute": "pose", "expected": "up", "extra": "dropped"}] * (MAX_REQUIREMENTS + 5)
+    saver.save("panel", 1, 1, Image.new("RGB", (4, 4)), {**CLEAN, "has_text": True}, prompt="p" * (PROMPT_CHARS + 50), requirements=rows)
+    record = records(tmp_path, brief=True)["panel_p1_d1.json"]
+    assert record["prompt"] == "p" * PROMPT_CHARS
+    assert record["requirements"][0] == {"subject": "x" * REQUIREMENT_CHARS, "attribute": "pose", "expected": "up"}
+    assert len(record["requirements"]) == MAX_REQUIREMENTS
 
 
 def test_reasons_are_trimmed_and_capped_at_eight(tmp_path):

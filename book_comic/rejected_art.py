@@ -1,9 +1,12 @@
 """Opt-in record of art the vision check rejected, for reviewing why images fail.
 
 Each rejected draw becomes <stage>_p<panel>_d<draw>.png and a .json beside it holding only fixed
-check names and the vision check's own short observations of the failed checks. A rejected draw the
-renderer kept anyway (book_comic.best_draw fallback) gets "selected": true in its .json. Prompt text,
-requirement text and character names never reach the JSON. Saving never changes the render.
+check names, the vision check's own short observations of the failed checks ("reasons": never the brief's
+text or a character name), and the brief the draw was checked against: the image prompt ("prompt", cut at
+PROMPT_CHARS) and the checked requirements ("requirements": subject/attribute/expected, at most
+MAX_REQUIREMENTS), so a rejection can be reproduced. The host keeps them admin-only with the image, which
+already shows the likeness. A rejected draw the renderer kept anyway (book_comic.best_draw fallback) gets
+"selected": true in its .json. Saving never changes the render.
 """
 
 import json
@@ -24,6 +27,9 @@ UNAVAILABLE = "check_unavailable"
 MAX_SAVED = 12
 MAX_REASONS = 8
 REASON_CHARS = 300
+PROMPT_CHARS = 6000
+MAX_REQUIREMENTS = 24
+REQUIREMENT_CHARS = 200
 
 
 def failed_checks(found: Dict, unavailable: bool = False) -> List[str]:
@@ -172,12 +178,20 @@ class RejectedArtSaver:
             stem = f"{stage}_p{int(panel)}_d{int(draw)}"
             record = {"stage": stage, "panel": int(panel), "draw": int(draw),
                       "failed_checks": failed_checks(found, unavailable),
-                      "reasons": failure_reasons(found, prompt, requirements, self.names)}
+                      "reasons": failure_reasons(found, prompt, requirements, self.names),
+                      "prompt": str(prompt or "")[:PROMPT_CHARS],
+                      "requirements": brief_requirements(requirements)}
             self.directory.mkdir(parents=True, exist_ok=True)
             art.convert("RGB").save(self.directory / f"{stem}.png", format="PNG")
             (self.directory / f"{stem}.json").write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
         except Exception as e:  # never let review bookkeeping change the render
             logger.debug(f"Could not save rejected art: {e}")
+
+
+def brief_requirements(requirements: Sequence[Dict]) -> List[Dict[str, str]]:
+    """The checked requirements as plain {subject, attribute, expected} strings, capped; other keys are dropped."""
+    return [{k: str(row.get(k, "")).strip()[:REQUIREMENT_CHARS] for k in ("subject", "attribute", "expected")}
+            for row in list(requirements or ())[:MAX_REQUIREMENTS]]
 
 
 def report(on_reject, draw, art, found, unavailable=False, prompt="", requirements=()) -> None:

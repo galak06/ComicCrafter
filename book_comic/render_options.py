@@ -33,7 +33,8 @@ class RenderOptions:
             for every panel. None draws no sheet
         dpi: DPI tag for saved page PNGs (e.g. PRINT_DPI); None leaves PIL's default
         rejected_dir: When set, every draw the art check rejects (panel, cover, sheet) is saved there as
-            <stage>_p<panel>_d<draw>.png plus a .json of failed check names and reasons (at most 12 per renderer)
+            <stage>_p<panel>_d<draw>.png plus a .json of failed check names, reasons, and the prompt and requirements
+            it was checked against (at most 12 per renderer; book_comic/rejected_art.py)
         style_ref: A picture whose palette, line work, lighting and texture every panel should match, normally the
             comic's unlettered front cover art: an image file path (str or Path), an open PIL image, or a data: URL
             (each sent as a JPEG of at most 1536 px), or an http(s) URL (sent as it is). It is the last reference of
